@@ -1,0 +1,93 @@
+.request-detail {
+  margin-bottom: var(--space-6);
+}
+
+.request-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.request-detail__meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.request-detail__meta dt {
+  color: var(--color-text-faint);
+  font-size: 0.8rem;
+}
+
+.request-detail__meta dd {
+  margin: 0;
+}
+
+.request-detail__attempts-heading {
+  margin-bottom: var(--space-3);
+}
+
+.attempt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.attempt-card {
+  padding: var(--space-4);
+}
+
+.attempt-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.attempt-card__backend {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  color: var(--color-accent);
+  letter-spacing: 0.04em;
+}
+
+.attempt-card__outcome {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.attempt-card__time {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--color-text-faint);
+}
+
+.attempt-card__query,
+.attempt-card__detail,
+.attempt-card__chosen {
+  font-size: 0.85rem;
+  margin: var(--space-1) 0;
+}
+
+.attempt-card__candidates {
+  margin-top: var(--space-2);
+  font-size: 0.78rem;
+  color: var(--color-text-faint);
+}
+
+.attempt-card__candidates ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+}
+
+.attempt-card__candidates li {
+  word-break: break-all;
+  margin-bottom: var(--space-1);
+}

@@ -1,0 +1,108 @@
+/*
+  Design tokens for Cadence.
+
+  Concept: a late-night studio console for cueing up exactly one track. Cadence never touches
+  a whole album, so the visual world is a single record label on a turntable platter, not a
+  crate or a shelf. Dark console body, a warm "cue light" amber for the one active/pending
+  state that matters, cool blues for the settled states (fulfilled), red only for failure.
+
+  Type: a humanist serif (Fraunces) for headings, echoing hand-printed record labels; a plain
+  grotesk (system-ui stack) for body/UI so the interface itself stays out of the way; a
+  monospace face for metadata that behaves like data (durations, timestamps, source badges).
+*/
+
+:root {
+  /* Palette: studio-console dark, one warm accent, restrained state colors */
+  --color-bg: #15130f;
+  --color-bg-raised: #1e1b16;
+  --color-bg-inset: #100e0b;
+  --color-line: #33302a;
+  --color-line-soft: #26231d;
+  --color-text: #ede6da;
+  --color-text-muted: #a89e8c;
+  --color-text-faint: #6f6656;
+
+  --color-accent: #e0a12e; /* the cue light: pending / needs attention */
+  --color-accent-strong: #f0b64a;
+  --color-accent-ink: #1a1408;
+
+  --color-status-pending: #e0a12e;
+  --color-status-approved: #4f8ff0;
+  --color-status-downloading: #7c6ff0;
+  --color-status-fulfilled: #59b37c;
+  --color-status-rejected: #8a8478;
+  --color-status-failed: #d9564b;
+
+  --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
+  --focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent-strong);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-bg: #f5f1e7;
+    --color-bg-raised: #fffdf8;
+    --color-bg-inset: #ece5d5;
+    --color-line: #ddd3bd;
+    --color-line-soft: #e8e1d0;
+    --color-text: #211d15;
+    --color-text-muted: #5d5646;
+    --color-text-faint: #948c78;
+
+    --color-accent: #a56b12;
+    --color-accent-strong: #8a5a0f;
+    --color-accent-ink: #fff8ea;
+
+    --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 20px rgba(60, 45, 10, 0.12);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

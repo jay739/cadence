@@ -1,0 +1,129 @@
+import type {
+  ApiErrorBody,
+  AuthResponse,
+  HealthResponse,
+  MultiSearchResponse,
+  RequestDetail,
+  RequestRecord,
+  SearchSourceName,
+  User,
+} from "../types/api";
+
+// Same-origin by default: the web client is served by the same container as the API and
+// never talks to any third-party source directly (Spotify/Prowlarr/etc. keys stay server-side,
+// per the mission's security requirements). VITE_API_BASE_URL exists only for local dev
+// against a backend running on a different port.
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+export class ApiError extends Error {
+  status: number;
+  body: ApiErrorBody | null;
+
+  constructor(status: number, body: ApiErrorBody | null, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+let authToken: string | null = null;
+
+export function setAuthToken(token: string | null): void {
+  authToken = token;
+  if (token) {
+    localStorage.setItem("cadence_token", token);
+  } else {
+    localStorage.removeItem("cadence_token");
+  }
+}
+
+export function loadStoredToken(): string | null {
+  authToken = localStorage.getItem("cadence_token");
+  return authToken;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("Content-Type", "application/json");
+  if (authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
+  }
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const body = contentType.includes("application/json") ? await response.json() : null;
+
+  if (!response.ok) {
+    const message =
+      (body as ApiErrorBody | null)?.detail ?? `Request failed with status ${response.status}`;
+    throw new ApiError(response.status, body, message);
+  }
+
+  return body as T;
+}
+
+export const api = {
+  auth: {
+    register: (email: string, password: string) =>
+      request<AuthResponse>("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      }),
+    login: (email: string, password: string) =>
+      request<AuthResponse>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      }),
+    logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+    me: () => request<User>("/api/auth/me"),
+  },
+  search: {
+    query: (q: string, limit = 20) =>
+      request<MultiSearchResponse>(
+        `/api/search?${new URLSearchParams({ q, limit: String(limit) })}`,
+      ),
+  },
+  requests: {
+    create: (payload: {
+      source: SearchSourceName;
+      source_id: string;
+      title: string;
+      artist: string;
+      album: string | null;
+      duration_seconds: number | null;
+      artwork_url: string | null;
+      musicbrainz_recording_id: string | null;
+    }) =>
+      request<RequestRecord>("/api/requests", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    mine: () => request<RequestRecord[]>("/api/requests/mine"),
+    detail: (id: string) => request<RequestDetail>(`/api/requests/${id}`),
+    adminPending: () => request<RequestRecord[]>("/api/requests/admin/pending"),
+    adminAll: () => request<RequestRecord[]>("/api/requests/admin/all"),
+    approve: (id: string, note?: string) =>
+      request<RequestRecord>(`/api/requests/${id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ note: note ?? null }),
+      }),
+    reject: (id: string, note?: string) =>
+      request<RequestRecord>(`/api/requests/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ note: note ?? null }),
+      }),
+  },
+  health: {
+    get: () => request<HealthResponse>("/api/health"),
+  },
+};
