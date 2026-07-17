@@ -139,6 +139,32 @@ class Settings(BaseSettings):
         self.session_secret = secret
         return secret
 
+    def resolved_settings_encryption_key(self) -> bytes:
+        """Return the Fernet key used to encrypt DB-stored integration secrets at rest.
+
+        Extends the exact generate-and-persist pattern used by `resolved_session_secret()`
+        above (same directory, same lazy-generate-on-first-boot behavior, same owner-only 0600
+        permissions) rather than inventing a second secret-management mechanism, per the
+        mission's explicit instruction. This is a *separate file* from session_secret.key, not
+        a key derived from SESSION_SECRET, because the two keys protect different things with
+        different rotation implications: SESSION_SECRET signs JWTs (rotating it invalidates
+        every logged-in session, which is fine, sessions are cheap to reissue) while this key
+        decrypts persisted integration credentials (rotating it without a re-encryption pass
+        would permanently strand every already-saved secret in the database). Keeping them
+        independent means a future session-secret rotation can never accidentally brick saved
+        Prowlarr/qBittorrent/slskd/Spotify credentials, and vice versa.
+        """
+        key_path = self.data_dir_path / "settings_encryption.key"
+        if key_path.exists():
+            return key_path.read_text(encoding="utf-8").strip().encode("utf-8")
+        from cryptography.fernet import Fernet
+
+        key = Fernet.generate_key()
+        key_path.write_text(key.decode("utf-8"), encoding="utf-8")
+        with contextlib.suppress(OSError):
+            key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        return key
+
     # --- Feature detection helpers, used by /api/health and the fulfillment worker ---
     @property
     def prowlarr_configured(self) -> bool:
