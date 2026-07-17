@@ -34,6 +34,22 @@ def get_engine():
     return _engine
 
 
+async def dispose_engine() -> None:
+    """Dispose the current engine's connection pool, if one exists.
+
+    Needed whenever init_engine() is called again to point at a new database (e.g. between
+    test cases sharing one event loop): without disposing the prior engine first, aiosqlite's
+    background worker thread for the old connection is abandoned mid-flight rather than closed
+    cleanly, and later raises "Event loop is closed" from its own thread once the loop it was
+    scheduled against eventually closes.
+    """
+    global _engine, _sessionmaker
+    if _engine is not None:
+        await _engine.dispose()
+    _engine = None
+    _sessionmaker = None
+
+
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     if _sessionmaker is None:
         raise RuntimeError("Session factory not initialized. Call init_engine() first.")

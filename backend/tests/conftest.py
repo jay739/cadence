@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 
-import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.base import create_all, get_sessionmaker, init_engine
+from app.db.base import create_all, dispose_engine, get_sessionmaker, init_engine
 
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+# Note: the session-scoped event loop (needed because aiosqlite's background worker thread
+# schedules callbacks back onto the loop that opened each connection, and a function-scoped
+# loop would be torn down mid-flight between tests) is configured via
+# asyncio_default_fixture_loop_scope = "session" in pyproject.toml, not a custom fixture here.
 
 
 @pytest_asyncio.fixture
@@ -25,3 +21,4 @@ async def db_session() -> AsyncIterator[AsyncSession]:
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
         yield session
+    await dispose_engine()

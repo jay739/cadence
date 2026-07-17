@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core.config import Settings
-from app.db.base import create_all, get_sessionmaker, init_engine
+from app.db.base import create_all, dispose_engine, get_sessionmaker, init_engine
 from app.models.request import Request, RequestStatus
 from app.models.user import User, UserRole
 from app.workers.fulfillment_worker import FulfillmentWorker
@@ -27,6 +27,7 @@ async def worker_db(tmp_path):
         await session.commit()
         await session.refresh(user)
         yield session, user
+    await dispose_engine()
 
 
 def _settings(tmp_path) -> Settings:

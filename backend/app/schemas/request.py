@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.request import RequestStatus
+
+# MusicBrainz MBIDs are always UUIDs. Strict validation here prevents a crafted string (e.g.
+# containing "../") from being raw-interpolated into the MusicBrainz lookup URL path later in
+# app.search_sources.musicbrainz.lookup_recording, which would otherwise let a client redirect
+# that request to an arbitrary MusicBrainz API path.
+_MBID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
 
 
 class CreateRequestIn(BaseModel):
@@ -32,6 +41,17 @@ class CreateRequestIn(BaseModel):
             return v
         v = v.strip()
         return v or None
+
+    @field_validator("musicbrainz_recording_id")
+    @classmethod
+    def _valid_mbid(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not _MBID_RE.match(v):
+            raise ValueError(
+                "musicbrainz_recording_id must be a valid MusicBrainz MBID"
+            )
+        return v.lower()
 
 
 class FulfillmentAttemptOut(BaseModel):

@@ -29,8 +29,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3.3,<9.0",
-    "pytest-asyncio>=0.24.0,<1.0",
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=1.0.0,<2.0",
     "pytest-cov>=5.0.0,<6.0",
     "pytest-httpx>=0.31.0,<1.0",
     "ruff>=0.7.0,<1.0",
@@ -66,5 +66,10 @@ exclude = ["tests/"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Session-scoped loop: aiosqlite schedules callbacks back onto the loop that opened each
+# connection from a background worker thread. A function-scoped loop (pytest-asyncio's
+# default) gets torn down between tests while that thread is still in flight, surfacing
+# "Event loop is closed" from aiosqlite's worker rather than from test code itself.
+asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
 addopts = "-ra --cov=app --cov-report=term-missing"
