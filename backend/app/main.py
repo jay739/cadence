@@ -10,7 +10,7 @@ import structlog
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -144,7 +144,36 @@ def create_app() -> FastAPI:
 
     static_dir = Path(__file__).resolve().parent.parent / "static"
     if static_dir.exists():
-        app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="web")
+        index_path = static_dir / "index.html"
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(static_dir / "assets")),
+            name="web-assets",
+        )
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_spa(full_path: str):
+            """Serve the built web client, falling back to index.html for client-side routes.
+
+            React Router owns paths like /login, /search, /requests/<id> entirely client-side;
+            the server has no matching route for them, so without this fallback a browser
+            refresh or direct link to any of those paths would 404 instead of loading the SPA,
+            which then renders the correct view itself. Never intercepts /api/* (those are
+            registered above and matched first, but an unknown /api/* path must still 404 as
+            JSON rather than fall through to index.html, hence the explicit guard).
+            """
+            if full_path.startswith("api/"):
+                return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+            candidate = (static_dir / full_path).resolve()
+            static_dir_resolved = static_dir.resolve()
+            is_within_static_dir = (
+                candidate == static_dir_resolved
+                or static_dir_resolved in candidate.parents
+            )
+            if full_path and is_within_static_dir and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(index_path)
 
     return app
 
