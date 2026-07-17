@@ -61,4 +61,31 @@ describe("api client", () => {
     const result = await api.health.get();
     expect(result.mode).toBe("demo");
   });
+
+  it("adminSettings.update PUTs to the per-integration endpoint with the given fields", async () => {
+    mockFetchOnce(200, { prowlarr: {}, qbittorrent: {}, slskd: {}, spotify: {}, library: {} });
+    await api.adminSettings.update("prowlarr", { prowlarr_url: "http://prowlarr:9696" });
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("/api/admin/settings/prowlarr");
+    expect(call[1].method).toBe("PUT");
+    expect(JSON.parse(call[1].body)).toEqual({ prowlarr_url: "http://prowlarr:9696" });
+  });
+
+  it("adminSettings.testConnection POSTs to the integration's /test endpoint", async () => {
+    mockFetchOnce(200, { ok: true, detail: "Connected" });
+    const result = await api.adminSettings.testConnection("slskd", {
+      slskd_url: "http://slskd:5030",
+    });
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("/api/admin/settings/slskd/test");
+    expect(call[1].method).toBe("POST");
+    expect(result.ok).toBe(true);
+  });
+
+  it("adminSettings.get fetches the settings summary", async () => {
+    mockFetchOnce(200, { prowlarr: {}, qbittorrent: {}, slskd: {}, spotify: {}, library: {} });
+    await api.adminSettings.get();
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("/api/admin/settings");
+  });
 });

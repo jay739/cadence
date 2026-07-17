@@ -145,4 +145,62 @@ test.describe("Auth guarding", () => {
     await page.goto("/admin");
     await expect(page).toHaveURL(/\/search/);
   });
+
+  test("a non-admin user cannot reach the integration settings page", async ({ page }) => {
+    await login(page, USER_EMAIL, USER_PASSWORD);
+    await page.goto("/admin/settings");
+    await expect(page).toHaveURL(/\/search/);
+  });
+});
+
+test.describe("Admin integration settings", () => {
+  test("an admin can open the settings page, edit a field, and save it", async ({ page }) => {
+    await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+
+    await page.getByRole("link", { name: "Settings" }).click();
+    await expect(page).toHaveURL(/\/admin\/settings$/);
+
+    await expect(page.getByRole("heading", { name: "Prowlarr" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "qBittorrent" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "slskd (Soulseek)" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Spotify" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+
+    const urlInput = page.locator("#prowlarr-prowlarr_url");
+    await urlInput.fill("http://prowlarr.example.internal:9696");
+
+    // Scope to the section whose *heading* is exactly "Prowlarr", not any section whose text
+    // merely mentions Prowlarr in passing (the qBittorrent section's description does).
+    const prowlarrSection = page
+      .locator(".settings-section")
+      .filter({ has: page.getByRole("heading", { name: "Prowlarr", exact: true }) });
+    const saveButton = prowlarrSection.getByRole("button", { name: "Save" });
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
+
+    // After a successful save, the field reflects the saved value and is tagged "saved" (db
+    // source), proving the round trip (not just an optimistic local echo).
+    await expect(prowlarrSection.getByText("saved")).toBeVisible();
+    await expect(urlInput).toHaveValue("http://prowlarr.example.internal:9696");
+  });
+
+  test("test connection reports a failure for an unreachable demo host without crashing", async ({
+    page,
+  }) => {
+    await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await page.goto("/admin/settings");
+
+    const slskdSection = page
+      .locator(".settings-section")
+      .filter({ has: page.getByRole("heading", { name: "slskd (Soulseek)", exact: true }) });
+    await slskdSection.locator("#slskd-slskd_url").fill("http://localhost:1");
+    await slskdSection.locator("#slskd-slskd_api_key").fill("demo-key");
+    await slskdSection.getByRole("button", { name: "Test connection" }).click();
+
+    // Whatever the outcome, the page must render a result message rather than hanging or
+    // erroring -- this is a real outbound attempt against a very unlikely-to-answer port.
+    await expect(slskdSection.locator(".form-error, .settings-test-ok")).toBeVisible({
+      timeout: 15_000,
+    });
+  });
 });
