@@ -71,7 +71,13 @@ def _write_flac_tags(
 
 
 def probe_duration_seconds(file_path: Path) -> int | None:
-    audio = MutagenFile(file_path)
+    try:
+        audio = MutagenFile(file_path)
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - a malformed/corrupt file must not raise here
+        logger.warning("duration_probe_failed", path=str(file_path), error=str(exc))
+        return None
     if audio is None or audio.info is None:
         return None
     return int(audio.info.length)
