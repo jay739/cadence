@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ask a question
+    url: https://github.com/jay739/cadence/discussions
+    about: Questions and general discussion belong in Discussions, not Issues.

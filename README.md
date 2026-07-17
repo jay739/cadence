@@ -4,26 +4,103 @@ A self-hosted, single-track music request service. Search for one song, request 
 approves it, and Cadence fetches exactly that track, nothing else.
 
 Every other tool in this space (Lidarr, Ombi, Headphones) is built around the artist or album
-as the unit of work: monitor an artist and you get their whole discography. Cadence exists
-because sometimes you just want one song.
-
-Status: early build, following [MISSION.md](MISSION.md). Not yet functional. See
-[REPORT.md](REPORT.md) once Phase 1 is complete for what has actually been built.
+as the unit of work: monitor an artist and you get their whole discography. Ombi's music
+requests still resolve through Lidarr under the hood, so even Ombi ends up pulling full
+artist/album data once anything is monitored. Cadence exists because sometimes you just want
+one song, and nothing else should get touched.
 
 ## What it does
 
-- Search for a track across multiple sources at once (Apple/iTunes, MusicBrainz, Spotify,
-  your own Prowlarr indexers), shown as separate tabs so you can pick the right result with
-  correct album art.
-- Request it. An admin approves or rejects from a queue.
-- On approval, Cadence tries your Prowlarr indexers first, then falls back to Soulseek (via
-  slskd) if nothing suitable turns up, grabs the single track, files and tags it.
-- No album, no artist, no library scan. One song in, one song done.
+- Search for a track across four sources at once, shown as separate tabs so you can pick the
+  right result with correct art and tell duplicates apart by source badge:
+  - **Apple/iTunes** (keyless, strong regional/film catalog coverage)
+  - **MusicBrainz** (keyless, canonical metadata for tagging once a track is picked)
+  - **Spotify** (your own Client Credentials app, no per-user login needed)
+  - **Prowlarr** (your own configured indexers, raw releases)
+- Request it. Requesting an already-pending or already-fulfilled track just shows its current
+  status instead of creating a duplicate.
+- An admin approves or rejects from a queue, with an optional note the requester sees.
+- On approval, Cadence tries your Prowlarr indexers first, grabs the best single-track match,
+  and hands it to your existing qBittorrent. If nothing suitable turns up, it falls back to
+  Soulseek via slskd. Either way, only the one requested file is ever touched.
+- Every fulfillment attempt (what was searched, what was considered, what was picked and why,
+  or why nothing qualified) is recorded per request and viewable in the UI, not just buried in
+  server logs.
+- No album, no artist, no library scan, no monitoring of anything beyond the one recording you
+  asked for.
+
+## Screenshots
+
+Run with `DEMO_MODE=true` (see Quickstart below) to explore the full UI, including every
+request status, with zero real API keys or a live Prowlarr/slskd instance.
+
+## Quickstart (Docker Compose)
+
+```bash
+git clone https://github.com/jay739/cadence.git
+cd cadence
+cp .env.example .env
+# edit .env: at minimum set ADMIN_BOOTSTRAP_EMAIL / ADMIN_BOOTSTRAP_PASSWORD,
+# or leave DEMO_MODE=true to explore without any configuration at all.
+docker compose up -d
+```
+
+Cadence listens on `:8000`. Put it behind your existing reverse proxy for TLS and a real
+hostname; Cadence itself does not terminate TLS.
+
+## Configuration reference
+
+All configuration is environment variables; see [`.env.example`](.env.example) for the full,
+commented list. Every third-party integration is optional at boot: Cadence starts and serves
+search/browsing even with none of them configured, surfacing "not configured" rather than
+failing to boot. Nothing here is ever sent to or callable from the browser; the web client
+only ever talks to Cadence's own API.
+
+| Variable                                                            | Purpose                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DEMO_MODE`                                                         | `true` seeds fake search results and a fake request queue, zero external calls.                                                                                                                                            |
+| `DATABASE_URL` / `DATA_DIR`                                         | Where the SQLite database and downloaded-file staging area live.                                                                                                                                                           |
+| `SESSION_SECRET`                                                    | HMAC/JWT signing key. Auto-generated and persisted (owner-only permissions) on first boot if unset.                                                                                                                        |
+| `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_PASSWORD`                | Creates the single admin account on first boot.                                                                                                                                                                            |
+| `PROWLARR_URL` / `PROWLARR_API_KEY`                                 | Your Prowlarr instance. Get an API key from Prowlarr's Settings -> General.                                                                                                                                                |
+| `QBITTORRENT_URL` / `QBITTORRENT_USERNAME` / `QBITTORRENT_PASSWORD` | Your existing qBittorrent instance (used to poll grabbed releases for completion).                                                                                                                                         |
+| `SLSKD_URL` / `SLSKD_API_KEY`                                       | Your slskd (Soulseek daemon) instance, the fallback path.                                                                                                                                                                  |
+| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`                       | A Client Credentials app from [developer.spotify.com](https://developer.spotify.com/dashboard) (Create app, no redirect URI needed for this flow). Powers the Spotify search tab only, no per-user Spotify login required. |
+| `MUSIC_LIBRARY_PATH` / `LIBRARY_PATH_PATTERN`                       | Where fulfilled tracks are filed, and the naming pattern (default `{artist}/{title}.{ext}`).                                                                                                                               |
+
+## Reverse proxy notes
+
+Cadence expects to sit behind a reverse proxy (Nginx Proxy Manager, Caddy, Traefik, etc.) that
+terminates TLS and forwards to `:8000`. It sends its own security headers (CSP,
+`X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options: DENY`); avoid a proxy config that
+overrides or strips them. If you serve the API and web client from the same origin (the
+default, since one container serves both), no CORS configuration is needed.
+
+## Security posture
+
+- Passwords hashed with argon2; sessions are JWTs with real expiry and a token-version claim
+  that invalidates all prior sessions on rotation.
+- Login and search endpoints are rate-limited.
+- All outbound calls to Apple/MusicBrainz/Spotify/Prowlarr/slskd/qBittorrent go through an
+  SSRF-hardened client that resolves DNS itself and blocks link-local, loopback, and metadata
+  addresses (with a separate, narrower allowance for your own operator-configured
+  Prowlarr/qBittorrent/slskd, which legitimately live on a private network).
+- The library file-move/tag-writing step sanitizes every path component and verifies the final
+  resolved path never escapes `MUSIC_LIBRARY_PATH`, even under adversarial titles/artists.
+- No secret is ever committed to this repository; see `.env.example`.
+- Full detail, including an honest covered/not-covered checklist, is in
+  [REPORT.md](REPORT.md).
+
+## Development guide
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev setup (backend, web client, and
+end-to-end tests) and coding conventions.
 
 ## Status
 
-Phase 1 (backend + web client) is in progress. Native apps (Windows, macOS, iOS, Android) are
-later, separate phases, each built against Phase 1's API once it is stable.
+Phase 1 (backend + web client) is built; see [REPORT.md](REPORT.md) for what shipped, what was
+decided along the way, and known gaps. Native apps (Windows, macOS, iOS, Android) are later,
+separate phases, each built against Phase 1's stable, OpenAPI-documented API.
 
 ## License
 

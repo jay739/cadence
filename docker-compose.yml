@@ -1,0 +1,60 @@
+services:
+  cadence:
+    build: .
+    image: cadence:local
+    container_name: cadence
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Core
+      DEMO_MODE: "false"
+      DATA_DIR: /app/data
+      MUSIC_LIBRARY_PATH: /app/library
+
+      # Auth (set a real bootstrap admin before first boot in production)
+      ADMIN_BOOTSTRAP_EMAIL: "${ADMIN_BOOTSTRAP_EMAIL:-}"
+      ADMIN_BOOTSTRAP_PASSWORD: "${ADMIN_BOOTSTRAP_PASSWORD:-}"
+
+      # Prowlarr, qBittorrent, slskd: wire these to your own stack. Left blank, Cadence still
+      # boots and serves search/browsing, surfacing "not configured" for fulfillment.
+      # PROWLARR_URL: "http://prowlarr:9696"
+      # PROWLARR_API_KEY: "${PROWLARR_API_KEY}"
+      # QBITTORRENT_URL: "http://qbittorrent:8080"
+      # QBITTORRENT_USERNAME: "${QBITTORRENT_USERNAME}"
+      # QBITTORRENT_PASSWORD: "${QBITTORRENT_PASSWORD}"
+      # SLSKD_URL: "http://slskd:5030"
+      # SLSKD_API_KEY: "${SLSKD_API_KEY}"
+
+      # Spotify Client Credentials app (app-only search tab)
+      # SPOTIFY_CLIENT_ID: "${SPOTIFY_CLIENT_ID}"
+      # SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}"
+    volumes:
+      - cadence-data:/app/data
+      # Point this at your actual music library root so filed tracks land in the real place.
+      - cadence-library:/app/library
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else sys.exit(1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # Uncomment if Cadence needs to reach Prowlarr/qBittorrent/slskd containers by name on the
+    # operator's existing Docker network rather than via published host ports.
+    # networks:
+    #   - media
+
+volumes:
+  cadence-data:
+  cadence-library:
+
+# networks:
+#   media:
+#     external: true
+#     name: media_network
