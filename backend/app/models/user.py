@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
+if TYPE_CHECKING:
+    from app.models.request import Request
+
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _uuid() -> str:
@@ -53,7 +57,7 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
-    requests: Mapped[list["Request"]] = relationship(back_populates="user")
+    requests: Mapped[list[Request]] = relationship(back_populates="user")
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"<User {self.email} role={self.role}>"

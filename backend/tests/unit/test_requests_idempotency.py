@@ -22,13 +22,13 @@ async def _make_user(db_session) -> User:
 
 
 def _body(**overrides) -> CreateRequestIn:
-    defaults = dict(
-        source="apple",
-        source_id="track-1",
-        title="Tum Hi Ho",
-        artist="Arijit Singh",
-        album="Aashiqui 2",
-    )
+    defaults = {
+        "source": "apple",
+        "source_id": "track-1",
+        "title": "Tum Hi Ho",
+        "artist": "Arijit Singh",
+        "album": "Aashiqui 2",
+    }
     defaults.update(overrides)
     return CreateRequestIn(**defaults)
 

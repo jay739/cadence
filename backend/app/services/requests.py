@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.request import Request, RequestStatus
 from app.models.user import User
@@ -27,6 +28,23 @@ async def get_request_by_dedupe_key(
 
 async def get_request_by_id(session: AsyncSession, request_id: str) -> Request | None:
     result = await session.execute(select(Request).where(Request.id == request_id))
+    return result.scalar_one_or_none()
+
+
+async def get_request_by_id_with_attempts(
+    session: AsyncSession, request_id: str
+) -> Request | None:
+    """Eager-loads the fulfillment attempts audit trail alongside the request.
+
+    Used by the request-detail route: Pydantic's from_attributes serialization happens after
+    the route handler returns, outside the session's greenlet context, so any lazy-loaded
+    relationship accessed at that point raises MissingGreenlet. Eager loading here avoids that.
+    """
+    result = await session.execute(
+        select(Request)
+        .where(Request.id == request_id)
+        .options(selectinload(Request.attempts))
+    )
     return result.scalar_one_or_none()
 
 

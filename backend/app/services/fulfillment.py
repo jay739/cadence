@@ -382,6 +382,18 @@ async def _try_slskd(
         return False
 
     username = winner.extra.get("username")
+    if not username:
+        await _log_attempt(
+            session,
+            request_row,
+            backend="slskd",
+            query_used=query,
+            candidates_considered=candidates_summary,
+            chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
+            outcome=FulfillmentOutcome.ERROR,
+            detail="Selected Soulseek candidate had no associated username",
+        )
+        return False
     started = await slskd.enqueue_download(
         username, winner.identifier, winner.size_bytes
     )

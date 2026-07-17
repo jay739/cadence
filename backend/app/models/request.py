@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
+if TYPE_CHECKING:
+    from app.models.user import User
+
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _uuid() -> str:
@@ -79,8 +83,8 @@ class Request(Base):
         DateTime(timezone=True), default=_now, onupdate=_now
     )
 
-    user: Mapped["User"] = relationship(back_populates="requests")
-    attempts: Mapped[list["FulfillmentAttempt"]] = relationship(
+    user: Mapped[User] = relationship(back_populates="requests")
+    attempts: Mapped[list[FulfillmentAttempt]] = relationship(
         back_populates="request",
         order_by="FulfillmentAttempt.created_at",
         cascade="all, delete-orphan",
@@ -116,7 +120,7 @@ class FulfillmentAttempt(Base):
         DateTime(timezone=True), default=_now, index=True
     )
 
-    request: Mapped["Request"] = relationship(back_populates="attempts")
+    request: Mapped[Request] = relationship(back_populates="attempts")
 
 
 class FulfillmentOutcome(str, enum.Enum):

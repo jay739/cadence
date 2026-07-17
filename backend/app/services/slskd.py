@@ -116,5 +116,8 @@ class SlskdClient:
         for directory in data.get("directories", []):
             for f in directory.get("files", []):
                 if f.get("filename") == filename:
-                    return f.get("state", "").lower().endswith("completed")
+                    # slskd reports composite states like "Completed, Succeeded" or
+                    # "Completed, Errored" - only the former means the file is usable.
+                    state = f.get("state", "").lower()
+                    return "completed" in state and "succeeded" in state
         return False

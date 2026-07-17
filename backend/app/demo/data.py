@@ -10,11 +10,20 @@ RequestStatus value at least once.
 from __future__ import annotations
 
 import hashlib
+from typing import TypedDict
 
 from app.models.request import RequestStatus
 from app.schemas.search import SourceSearchResult, TrackResult
 
-_DEMO_CATALOG = [
+
+class _CatalogEntry(TypedDict):
+    title: str
+    artist: str
+    album: str
+    year: int
+
+
+_DEMO_CATALOG: list[_CatalogEntry] = [
     {
         "title": "Naatu Naatu",
         "artist": "Rahul Sipligunj, Kaala Bhairava",
@@ -149,7 +158,19 @@ def demo_search_results(query: str) -> list[SourceSearchResult]:
     ]
 
 
-DEMO_REQUEST_SEEDS = [
+class _RequestSeed(TypedDict, total=False):
+    title: str
+    artist: str
+    album: str
+    source: str
+    source_id: str
+    status: RequestStatus
+    final_file_path: str
+    admin_note: str
+    failure_reason: str
+
+
+DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
     {
         "title": "Naatu Naatu",
         "artist": "Rahul Sipligunj, Kaala Bhairava",

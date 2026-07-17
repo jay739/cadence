@@ -11,8 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.demo.data import DEMO_REQUEST_SEEDS
-from app.models.request import FulfillmentAttempt, FulfillmentOutcome, Request
-from app.models.user import User, UserRole
+from app.models.request import (
+    FulfillmentAttempt,
+    FulfillmentOutcome,
+    Request,
+    RequestStatus,
+)
+from app.models.user import UserRole
 from app.services.requests import compute_dedupe_key
 from app.services.users import create_user, get_user_by_email
 
@@ -52,6 +57,7 @@ async def seed_demo_data(session: AsyncSession) -> None:
         )
 
     for seed in DEMO_REQUEST_SEEDS:
+        status: RequestStatus = seed["status"]
         dedupe_key = compute_dedupe_key(seed["source"], seed["source_id"])
         row = Request(
             user_id=demo_user.id,
@@ -61,7 +67,7 @@ async def seed_demo_data(session: AsyncSession) -> None:
             source=seed["source"],
             source_id=seed["source_id"],
             dedupe_key=dedupe_key,
-            status=seed["status"],
+            status=status,
             admin_note=seed.get("admin_note"),
             failure_reason=seed.get("failure_reason"),
             final_file_path=seed.get("final_file_path"),
@@ -69,7 +75,7 @@ async def seed_demo_data(session: AsyncSession) -> None:
         session.add(row)
         await session.flush()
 
-        if seed["status"].value in ("downloading", "fulfilled", "failed"):
+        if status.value in ("downloading", "fulfilled", "failed"):
             session.add(
                 FulfillmentAttempt(
                     request_id=row.id,
@@ -86,12 +92,12 @@ async def seed_demo_data(session: AsyncSession) -> None:
                             "name": f"{seed['artist']} - {seed['title']} [FLAC]",
                             "similarity": 0.94,
                         }
-                        if seed["status"].value != "failed"
+                        if status.value != "failed"
                         else None
                     ),
                     outcome=(
                         FulfillmentOutcome.GRABBED.value
-                        if seed["status"].value != "failed"
+                        if status.value != "failed"
                         else FulfillmentOutcome.SEARCHED_NO_QUALIFYING_CANDIDATE.value
                     ),
                     detail=seed.get("failure_reason"),

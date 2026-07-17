@@ -47,16 +47,16 @@ async def health(
     }
 
     if not settings.demo_mode:
-        if settings.prowlarr_configured:
+        if settings.prowlarr_configured and settings.prowlarr_url:
             integrations["prowlarr"].reachable = await _reachable(
                 f"{settings.prowlarr_url.rstrip('/')}/api/v1/system/status",
                 headers={"X-Api-Key": settings.prowlarr_api_key},
             )
-        if settings.qbittorrent_configured:
+        if settings.qbittorrent_configured and settings.qbittorrent_url:
             integrations["qbittorrent"].reachable = await _reachable(
                 f"{settings.qbittorrent_url.rstrip('/')}/api/v2/app/version"
             )
-        if settings.slskd_configured:
+        if settings.slskd_configured and settings.slskd_url:
             integrations["slskd"].reachable = await _reachable(
                 f"{settings.slskd_url.rstrip('/')}/api/v0/session",
                 headers={"X-API-Key": settings.slskd_api_key},

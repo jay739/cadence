@@ -7,6 +7,7 @@ start and serve search/browsing even when no fulfillment backend is configured.
 
 from __future__ import annotations
 
+import contextlib
 import secrets
 import stat
 from functools import lru_cache
@@ -132,10 +133,9 @@ class Settings(BaseSettings):
             return secret_path.read_text(encoding="utf-8").strip()
         secret = secrets.token_urlsafe(64)
         secret_path.write_text(secret, encoding="utf-8")
-        try:
+        # Best-effort: some filesystems (e.g. certain FUSE mounts) don't support chmod.
+        with contextlib.suppress(OSError):
             secret_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-        except OSError:
-            pass  # best-effort on filesystems that don't support chmod (e.g. some FUSE mounts)
         self.session_secret = secret
         return secret
 

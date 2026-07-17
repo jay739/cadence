@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import Request as FastAPIRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_admin
@@ -18,6 +19,7 @@ from app.services.requests import (
     approve_request,
     create_or_get_existing_request,
     get_request_by_id,
+    get_request_by_id_with_attempts,
     list_all_requests,
     list_pending_requests,
     list_requests_for_user,
@@ -69,7 +71,7 @@ async def get_request_detail(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> RequestDetailOut:
-    request_row = await get_request_by_id(session, request_id)
+    request_row = await get_request_by_id_with_attempts(session, request_id)
     if request_row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"

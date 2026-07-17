@@ -109,7 +109,7 @@ def _resolve_and_check(url: str, *, policy: str) -> ResolvedTarget:
     if not infos:
         raise SafeHttpError(f"DNS resolution returned no results for {host!r}")
 
-    resolved_ip = infos[0][4][0]
+    resolved_ip = str(infos[0][4][0])
     if _ip_is_blocked(resolved_ip, allow_private=allow_private):
         raise SafeHttpError(f"Blocked target address for {host!r} -> {resolved_ip}")
 
@@ -133,7 +133,7 @@ class SafeHttpClient:
         *,
         policy: str,
         params: dict | None = None,
-        json: dict | None = None,
+        json: dict | list | None = None,
         headers: dict | None = None,
         data: dict | None = None,
     ) -> httpx.Response:
@@ -179,7 +179,7 @@ class SafeHttpClient:
         *,
         policy: str = POLICY_PUBLIC_ONLY,
         params: dict | None = None,
-        json: dict | None = None,
+        json: dict | list | None = None,
         data: dict | None = None,
         headers: dict | None = None,
     ) -> httpx.Response:

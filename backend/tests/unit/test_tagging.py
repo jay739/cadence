@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-from mutagen.flac import FLAC
-from mutagen.mp3 import MP3
-
 from app.services.tagging import probe_duration_seconds, write_tags
 
 # Minimal valid FLAC/MP3 fixtures are non-trivial to synthesize from scratch; instead we build

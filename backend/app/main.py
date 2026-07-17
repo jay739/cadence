@@ -8,6 +8,7 @@ from pathlib import Path
 
 import structlog
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +21,7 @@ from app.api.routes_auth import router as auth_router
 from app.api.routes_health import router as health_router
 from app.api.routes_requests import router as requests_router
 from app.api.routes_search import router as search_router
-from app.core.config import Settings, get_settings
+from app.core.config import get_settings
 from app.core.limiter import limiter
 from app.core.middleware import SecurityHeadersMiddleware
 from app.db.base import create_all, get_sessionmaker, init_engine
@@ -85,7 +86,9 @@ def create_app() -> FastAPI:
     )
 
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    # slowapi's handler signature is narrower than Starlette's typed ExceptionHandler protocol
+    # expects; this is slowapi's own documented usage pattern, not a real type mismatch.
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
     app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 
@@ -104,10 +107,14 @@ def create_app() -> FastAPI:
     async def validation_exception_handler(
         request: Request, exc: RequestValidationError
     ):
-        logger.info("validation_error", path=request.url.path, errors=exc.errors())
+        # exc.errors() can contain non-JSON-serializable values (e.g. the raised ValueError
+        # instance itself in ctx.error for custom @field_validator errors), so this must go
+        # through jsonable_encoder rather than being handed to JSONResponse raw.
+        safe_errors = jsonable_encoder(exc.errors())
+        logger.info("validation_error", path=request.url.path, errors=safe_errors)
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"detail": "Invalid request", "errors": exc.errors()},
+            content={"detail": "Invalid request", "errors": safe_errors},
         )
 
     @app.exception_handler(SQLAlchemyError)

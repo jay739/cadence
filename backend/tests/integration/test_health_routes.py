@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import pytest
+
+pytestmark = pytest.mark.asyncio
+
+
+class TestHealth:
+    async def test_health_is_public(self, app_client):
+        resp = await app_client.get("/api/health")
+        assert resp.status_code == 200
+
+    async def test_health_reports_version_and_mode(self, app_client):
+        resp = await app_client.get("/api/health")
+        body = resp.json()
+        assert body["version"]
+        assert body["mode"] == "live"
+        assert body["database_ok"] is True
+
+    async def test_health_demo_mode_reported(self, demo_app_client):
+        resp = await demo_app_client.get("/api/health")
+        assert resp.json()["mode"] == "demo"
+
+    async def test_health_reports_all_integrations_unconfigured_by_default(
+        self, app_client
+    ):
+        resp = await app_client.get("/api/health")
+        integrations = resp.json()["integrations"]
+        assert set(integrations.keys()) == {
+            "prowlarr",
+            "qbittorrent",
+            "slskd",
+            "spotify",
+        }
+        for status in integrations.values():
+            assert status["configured"] is False
+
+    async def test_health_never_leaks_secrets_or_urls(self, app_client, monkeypatch):
+        monkeypatch.setenv("PROWLARR_URL", "http://internal-prowlarr.example:9696")
+        monkeypatch.setenv("PROWLARR_API_KEY", "super-secret-key-value")
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+        resp = await app_client.get("/api/health")
+        assert "super-secret-key-value" not in resp.text
+        assert "internal-prowlarr.example" not in resp.text
+        get_settings.cache_clear()
+
+
+class TestSecurityHeaders:
+    async def test_csp_header_present(self, app_client):
+        resp = await app_client.get("/api/health")
+        assert "Content-Security-Policy" in resp.headers
+        assert "frame-ancestors 'none'" in resp.headers["Content-Security-Policy"]
+
+    async def test_x_content_type_options_present(self, app_client):
+        resp = await app_client.get("/api/health")
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+
+    async def test_referrer_policy_present(self, app_client):
+        resp = await app_client.get("/api/health")
+        assert resp.headers["Referrer-Policy"] == "no-referrer"
+
+    async def test_frame_options_deny(self, app_client):
+        resp = await app_client.get("/api/health")
+        assert resp.headers["X-Frame-Options"] == "DENY"

@@ -52,7 +52,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
-ignore = ["B008"]
+# B008: FastAPI's Depends(...) as a default arg is the framework's own idiom.
+# UP042: str+Enum (not enum.StrEnum) is deliberate here for broad Pydantic v2/SQLAlchemy
+# JSON- and column-serialization compatibility.
+ignore = ["B008", "UP042"]
 
 [tool.mypy]
 python_version = "3.11"

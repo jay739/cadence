@@ -12,7 +12,7 @@ so timing side-channels don't leak information about how close a guess was.
 from __future__ import annotations
 
 import hmac
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -46,7 +46,7 @@ def create_session_token(
     secret: str,
     ttl_minutes: int,
 ) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload: dict[str, Any] = {
         "sub": user_id,
         "role": role,

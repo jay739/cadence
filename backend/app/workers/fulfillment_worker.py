@@ -16,6 +16,7 @@ FAILED, and logging continues; the worker loop itself never exits because of it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 
 import structlog
@@ -28,14 +29,14 @@ from app.services.fulfillment import fulfill_request
 
 logger = structlog.get_logger(__name__)
 
-_worker_singleton: "FulfillmentWorker | None" = None
+_worker_singleton: FulfillmentWorker | None = None
 
 
-def get_worker() -> "FulfillmentWorker | None":
+def get_worker() -> FulfillmentWorker | None:
     return _worker_singleton
 
 
-def set_worker(worker: "FulfillmentWorker | None") -> None:
+def set_worker(worker: FulfillmentWorker | None) -> None:
     global _worker_singleton
     _worker_singleton = worker
 
@@ -63,8 +64,11 @@ class FulfillmentWorker:
                 .values(status=RequestStatus.APPROVED, worker_lock_token=None)
             )
             await session.commit()
-            if result.rowcount:
-                logger.warning("recovered_crashed_jobs", count=result.rowcount)
+            # UPDATE statements yield a CursorResult at runtime, which has .rowcount; the
+            # async session's return type is only known generically as Result[Any] to mypy.
+            rowcount = result.rowcount  # type: ignore[attr-defined]
+            if rowcount:
+                logger.warning("recovered_crashed_jobs", count=rowcount)
 
     async def _claim_next(self) -> Request | None:
         sessionmaker = get_sessionmaker()
@@ -125,12 +129,10 @@ class FulfillmentWorker:
                 continue  # immediately check for another job
 
             self._wake_event.clear()
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._wake_event.wait(), timeout=self._poll_interval
                 )
-            except asyncio.TimeoutError:
-                pass
 
     def start(self) -> None:
         if self._task is not None:
