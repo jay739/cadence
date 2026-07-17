@@ -2,10 +2,13 @@ import type {
   ApiErrorBody,
   AuthResponse,
   HealthResponse,
+  IntegrationSettings,
   MultiSearchResponse,
   RequestDetail,
   RequestRecord,
   SearchSourceName,
+  SettingsIntegrationName,
+  TestConnectionResult,
   User,
 } from "../types/api";
 
@@ -125,5 +128,18 @@ export const api = {
   },
   health: {
     get: () => request<HealthResponse>("/api/health"),
+  },
+  adminSettings: {
+    get: () => request<IntegrationSettings>("/api/admin/settings"),
+    update: (integration: SettingsIntegrationName, fields: Record<string, string>) =>
+      request<IntegrationSettings>(`/api/admin/settings/${integration}`, {
+        method: "PUT",
+        body: JSON.stringify(fields),
+      }),
+    testConnection: (integration: SettingsIntegrationName, fields: Record<string, string>) =>
+      request<TestConnectionResult>(`/api/admin/settings/${integration}/test`, {
+        method: "POST",
+        body: JSON.stringify(fields),
+      }),
   },
 };

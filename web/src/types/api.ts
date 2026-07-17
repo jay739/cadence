@@ -49,7 +49,12 @@ export interface MultiSearchResponse {
 }
 
 export type RequestStatus =
-  "pending" | "approved" | "downloading" | "fulfilled" | "rejected" | "failed";
+  | "pending"
+  | "approved"
+  | "downloading"
+  | "fulfilled"
+  | "rejected"
+  | "failed";
 
 export interface RequestRecord {
   id: string;
@@ -101,4 +106,55 @@ export interface HealthResponse {
 export interface ApiErrorBody {
   detail?: string;
   errors?: unknown;
+}
+
+// --- Admin-editable integration settings (mirrors backend/app/schemas/settings.py) ---
+
+export type SettingsFieldSource = "env" | "db" | "unset";
+
+export interface SettingsFieldValue {
+  value: string | null;
+  source: SettingsFieldSource;
+  is_secret: boolean;
+}
+
+export interface ProwlarrSettings {
+  prowlarr_url: SettingsFieldValue;
+  prowlarr_api_key: SettingsFieldValue;
+}
+
+export interface QBittorrentSettings {
+  qbittorrent_url: SettingsFieldValue;
+  qbittorrent_username: SettingsFieldValue;
+  qbittorrent_password: SettingsFieldValue;
+}
+
+export interface SlskdSettings {
+  slskd_url: SettingsFieldValue;
+  slskd_api_key: SettingsFieldValue;
+}
+
+export interface SpotifySettings {
+  spotify_client_id: SettingsFieldValue;
+  spotify_client_secret: SettingsFieldValue;
+}
+
+export interface LibrarySettings {
+  music_library_path: SettingsFieldValue;
+  library_path_pattern: SettingsFieldValue;
+}
+
+export interface IntegrationSettings {
+  prowlarr: ProwlarrSettings;
+  qbittorrent: QBittorrentSettings;
+  slskd: SlskdSettings;
+  spotify: SpotifySettings;
+  library: LibrarySettings;
+}
+
+export type SettingsIntegrationName = "prowlarr" | "qbittorrent" | "slskd" | "spotify" | "library";
+
+export interface TestConnectionResult {
+  ok: boolean;
+  detail: string;
 }

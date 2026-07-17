@@ -7,6 +7,7 @@ import { SearchPage } from "./pages/SearchPage";
 import { MyRequestsPage } from "./pages/MyRequestsPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
 import { AdminQueuePage } from "./pages/AdminQueuePage";
+import { AdminSettingsPage } from "./pages/AdminSettingsPage";
 
 function App() {
   return (
@@ -28,6 +29,14 @@ function App() {
           element={
             <ProtectedRoute requireAdmin>
               <AdminQueuePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/settings"
+          element={
+            <ProtectedRoute requireAdmin>
+              <AdminSettingsPage />
             </ProtectedRoute>
           }
         />
