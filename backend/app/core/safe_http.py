@@ -161,7 +161,10 @@ class SafeHttpClient:
         try:
             return await _attempt()
         except (httpx.TimeoutException, httpx.TransportError) as exc:
-            raise SafeHttpError(f"Request to {url} failed: {exc}") from exc
+            # httpx's own timeout/transport exceptions frequently carry an empty str(exc), so
+            # always include the exception's type name too or the message is just "failed: ".
+            detail = str(exc) or type(exc).__name__
+            raise SafeHttpError(f"Request to {url} failed: {detail}") from exc
 
     async def get(
         self,

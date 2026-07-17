@@ -17,6 +17,13 @@ from app.search_sources.base import SearchSource
 # Prowlarr's "audio" search category (Sonarr/Radarr/Prowlarr's shared category numbering).
 AUDIO_CATEGORY_IDS = [3000, 3010, 3020, 3030, 3040]
 
+# Prowlarr's /api/v1/search fans a single call out across every configured indexer, so it is
+# routinely much slower than the other sources' single-call APIs (observed ~20s against a real
+# instance with a handful of indexers configured). The shared SafeHttpClient default (8s, tuned
+# for Apple/MusicBrainz/Spotify's single-call APIs) is far too short here and would make every
+# real Prowlarr search time out.
+PROWLARR_TIMEOUT_SECONDS = 45.0
+
 
 class ProwlarrSearchSource(SearchSource):
     name = "prowlarr"
@@ -29,7 +36,9 @@ class ProwlarrSearchSource(SearchSource):
     ) -> None:
         self._base_url = base_url.rstrip("/") if base_url else None
         self._api_key = api_key
-        self._http = http or SafeHttpClient()
+        self._http = http or SafeHttpClient(
+            timeout_seconds=PROWLARR_TIMEOUT_SECONDS, max_retries=0
+        )
 
     @property
     def configured(self) -> bool:
