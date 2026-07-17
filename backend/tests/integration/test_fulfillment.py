@@ -423,3 +423,54 @@ class TestCrashRecoveryReEvaluation:
         # Must remain untouched; fulfill_request short-circuits for already-fulfilled requests.
         assert request_row.status == RequestStatus.FULFILLED
         assert request_row.final_file_path == "Artist/Title.flac"
+
+
+class TestFulfillmentUsesDbSavedSettings:
+    """Proves the worker's read path, not just /api/health and /api/search, honors a Prowlarr
+    connection saved through the admin settings UI (no env var, no restart, no re-creating the
+    Settings object passed to fulfill_request -- exactly what a running FulfillmentWorker would
+    have in hand when an admin saves settings mid-session)."""
+
+    async def test_prowlarr_saved_only_in_db_is_used_by_fulfillment(
+        self, fulfillment_db, tmp_path, monkeypatch, httpx_mock
+    ):
+        monkeypatch.delenv("PROWLARR_URL", raising=False)
+        monkeypatch.delenv("PROWLARR_API_KEY", raising=False)
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+
+        # settings has NO Prowlarr fields set at construction time or via env; only a DB row,
+        # saved the same way the admin settings PUT route saves one.
+        settings = _settings(tmp_path)
+        key = settings.resolved_settings_encryption_key()
+        from app.services.settings_store import upsert_setting
+
+        await upsert_setting(
+            session,
+            field_name="prowlarr_url",
+            value="http://localhost:9697",
+            key=key,
+            is_secret=False,
+        )
+        await upsert_setting(
+            session,
+            field_name="prowlarr_api_key",
+            value="db-saved-key",
+            key=key,
+            is_secret=True,
+        )
+
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:9697/api/v1/search.*"), json=[]
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        attempts = await _attempts_of(session, request_row.id)
+        prowlarr_attempts = [a for a in attempts if a.backend == "prowlarr"]
+        # SEARCHED_NO_CANDIDATES (not SKIPPED_NOT_CONFIGURED) proves Prowlarr was actually
+        # called using the DB-saved URL/key, not skipped as unconfigured.
+        assert (
+            prowlarr_attempts[0].outcome
+            == FulfillmentOutcome.SEARCHED_NO_CANDIDATES.value
+        )
