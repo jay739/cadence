@@ -7,12 +7,18 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
 
 # Node
 node_modules/
 dist/
 build/
 .svelte-kit/
+web/test-results/
+web/playwright-report/
+backend/static/
 
 # Env and secrets
 .env
