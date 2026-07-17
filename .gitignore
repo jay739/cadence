@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+build/
+.svelte-kit/
+
+# Env and secrets
+.env
+.env.local
+*.local
+
+# Data
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Docs generated locally, never pushed
+docs/PACKAGES.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
