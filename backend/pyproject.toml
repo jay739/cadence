@@ -2,7 +2,10 @@
 name = "cadence"
 version = "0.1.0"
 description = "Self-hostable single-track music request service backend"
-readme = "../README.md"
+# No `readme` pointing outside this directory: the Docker build's backend-builder stage only
+# copies backend/pyproject.toml and backend/app into the build context, so a reference to
+# ../README.md (which exists in local dev but not in that stage) fails hatchling's metadata
+# validation there. The real README lives at the repo root regardless.
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Jayakrishna Konda", email = "contact@jay739.dev" }]
