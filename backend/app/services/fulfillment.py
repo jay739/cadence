@@ -48,6 +48,7 @@ from app.services.scoring import (
     format_rank,
     title_artist_similarity,
 )
+from app.services.settings_store import apply_effective_settings
 from app.services.slskd import SlskdClient
 from app.services.tagging import write_tags
 
@@ -464,6 +465,11 @@ async def fulfill_request(
     """
     if request_row.status == RequestStatus.FULFILLED:
         return
+
+    # Resolve DB-saved admin settings (env-var-wins-if-set, per settings_store's precedence
+    # rule) fresh for every fulfillment pass, so a save made through the settings UI after a
+    # request was approved is honored on this attempt without a worker/container restart.
+    settings = await apply_effective_settings(session, settings)
 
     request_row.status = RequestStatus.DOWNLOADING
     await session.commit()

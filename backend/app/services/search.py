@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.demo.data import demo_search_results
@@ -18,12 +19,17 @@ from app.search_sources.apple import AppleSearchSource
 from app.search_sources.musicbrainz import MusicBrainzSearchSource
 from app.search_sources.prowlarr import ProwlarrSearchSource
 from app.search_sources.spotify import SpotifySearchSource
+from app.services.settings_store import apply_effective_settings
 
 logger = structlog.get_logger(__name__)
 
 
 async def multi_source_search(
-    query: str, settings: Settings, *, limit: int = 20
+    query: str,
+    settings: Settings,
+    session: AsyncSession | None = None,
+    *,
+    limit: int = 20,
 ) -> MultiSearchResponse:
     query = query.strip()
     if not query:
@@ -31,6 +37,13 @@ async def multi_source_search(
 
     if settings.demo_mode:
         return MultiSearchResponse(query=query, sources=demo_search_results(query))
+
+    # `session` is optional so unit tests exercising this function directly against a bare
+    # Settings object (no DB fixture) keep working unchanged; the live route always passes one
+    # so the mission-scoped fields (Prowlarr/Spotify/etc.) reflect DB-saved admin settings too,
+    # not just env vars, without a restart.
+    if session is not None:
+        settings = await apply_effective_settings(session, settings)
 
     sources = [
         AppleSearchSource(),

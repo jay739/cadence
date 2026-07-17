@@ -9,6 +9,7 @@ from app.api.deps import get_app_settings, get_db
 from app.core.config import Settings
 from app.core.safe_http import POLICY_ALLOW_PRIVATE, SafeHttpClient, SafeHttpError
 from app.schemas.health import HealthOut, IntegrationStatus
+from app.services.settings_store import apply_effective_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -38,6 +39,11 @@ async def health(
         await session.execute(text("SELECT 1"))
     except Exception:  # noqa: BLE001
         database_ok = False
+
+    # DB-stored admin settings must be reflected here too (not just env vars), since /api/health
+    # is how the rest of the app (and any future native client) knows what is actually usable.
+    if not settings.demo_mode and database_ok:
+        settings = await apply_effective_settings(session, settings)
 
     integrations: dict[str, IntegrationStatus] = {
         "prowlarr": IntegrationStatus(configured=settings.prowlarr_configured),

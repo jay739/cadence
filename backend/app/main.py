@@ -21,11 +21,13 @@ from app.api.routes_auth import router as auth_router
 from app.api.routes_health import router as health_router
 from app.api.routes_requests import router as requests_router
 from app.api.routes_search import router as search_router
+from app.api.routes_settings import router as settings_router
 from app.core.config import get_settings
 from app.core.limiter import limiter
 from app.core.middleware import SecurityHeadersMiddleware
 from app.db.base import create_all, get_sessionmaker, init_engine
 from app.demo.seed import seed_demo_data
+from app.services.settings_store import seed_db_from_env_on_boot
 from app.services.users import bootstrap_admin
 from app.workers.fulfillment_worker import FulfillmentWorker, set_worker
 
@@ -54,6 +56,8 @@ async def lifespan(app: FastAPI):
             email=settings.admin_bootstrap_email,
             password=settings.admin_bootstrap_password,
         )
+        if not settings.demo_mode:
+            await seed_db_from_env_on_boot(session, settings)
         if settings.demo_mode:
             await seed_demo_data(session)
 
@@ -141,6 +145,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(search_router)
     app.include_router(requests_router)
+    app.include_router(settings_router)
 
     static_dir = Path(__file__).resolve().parent.parent / "static"
     if static_dir.exists():
