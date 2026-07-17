@@ -58,21 +58,21 @@ bulk-grabbing anything.
 
 ### Every route, its validation, auth, and rate limit
 
-| Method & path | Auth | Rate limit | Validation |
-|---|---|---|---|
-| `GET /api/health` | none (public) | none | n/a; never leaks URLs/keys/paths, only configured/reachable booleans |
-| `POST /api/auth/register` | none | 10/min per IP | Pydantic `RegisterIn`: `EmailStr`, password min 10 chars |
-| `POST /api/auth/login` | none | 10/min per IP | Pydantic `LoginIn`; constant-time-safe (dummy-hash verify on unknown email so timing doesn't reveal account existence) |
-| `POST /api/auth/logout` | none required (clears cookie either way) | none | n/a |
-| `GET /api/auth/me` | Bearer token or session cookie | none | n/a |
-| `GET /api/search` | required (any authenticated user) | 30/min per IP | `q`: 1-300 chars; `limit`: 1-50 |
-| `POST /api/requests` | required | 20/min per IP | `CreateRequestIn`: source is an enum of the four allowed values, title/artist required non-empty (whitespace-stripped), `musicbrainz_recording_id` validated as a strict MBID/UUID (see security findings), all string fields length-capped |
-| `GET /api/requests/mine` | required | none | n/a |
-| `GET /api/requests/{request_id}` | required, owner-or-admin | none | 404 (not 403) for a non-owner, so existence isn't leaked to other users |
-| `GET /api/requests/admin/pending` | admin only | none | n/a |
-| `GET /api/requests/admin/all` | admin only | none | n/a |
-| `POST /api/requests/{request_id}/approve` | admin only | none | `ApproveRequestIn`: optional note, max 2000 chars |
-| `POST /api/requests/{request_id}/reject` | admin only | none | `RejectRequestIn`: same |
+| Method & path                             | Auth                                     | Rate limit    | Validation                                                                                                                                                                                                                                  |
+| ----------------------------------------- | ---------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`                         | none (public)                            | none          | n/a; never leaks URLs/keys/paths, only configured/reachable booleans                                                                                                                                                                        |
+| `POST /api/auth/register`                 | none                                     | 10/min per IP | Pydantic `RegisterIn`: `EmailStr`, password min 10 chars                                                                                                                                                                                    |
+| `POST /api/auth/login`                    | none                                     | 10/min per IP | Pydantic `LoginIn`; constant-time-safe (dummy-hash verify on unknown email so timing doesn't reveal account existence)                                                                                                                      |
+| `POST /api/auth/logout`                   | none required (clears cookie either way) | none          | n/a                                                                                                                                                                                                                                         |
+| `GET /api/auth/me`                        | Bearer token or session cookie           | none          | n/a                                                                                                                                                                                                                                         |
+| `GET /api/search`                         | required (any authenticated user)        | 30/min per IP | `q`: 1-300 chars; `limit`: 1-50                                                                                                                                                                                                             |
+| `POST /api/requests`                      | required                                 | 20/min per IP | `CreateRequestIn`: source is an enum of the four allowed values, title/artist required non-empty (whitespace-stripped), `musicbrainz_recording_id` validated as a strict MBID/UUID (see security findings), all string fields length-capped |
+| `GET /api/requests/mine`                  | required                                 | none          | n/a                                                                                                                                                                                                                                         |
+| `GET /api/requests/{request_id}`          | required, owner-or-admin                 | none          | 404 (not 403) for a non-owner, so existence isn't leaked to other users                                                                                                                                                                     |
+| `GET /api/requests/admin/pending`         | admin only                               | none          | n/a                                                                                                                                                                                                                                         |
+| `GET /api/requests/admin/all`             | admin only                               | none          | n/a                                                                                                                                                                                                                                         |
+| `POST /api/requests/{request_id}/approve` | admin only                               | none          | `ApproveRequestIn`: optional note, max 2000 chars                                                                                                                                                                                           |
+| `POST /api/requests/{request_id}/reject`  | admin only                               | none          | `RejectRequestIn`: same                                                                                                                                                                                                                     |
 
 Every route funnels database errors and unhandled exceptions through the app-level exception
 handlers (`SQLAlchemyError` -> 500 with a generic message, anything else -> 500 with a generic
@@ -82,12 +82,12 @@ error objects aren't always JSON-serializable, see findings below).
 
 ### Search-source integration matrix
 
-| Source | Auth method | Rate limit respected | Failure mode |
-|---|---|---|---|
-| Apple/iTunes | none (keyless) | none published; not throttled client-side beyond the shared 30/min per-user search limit | Timeout/5xx/malformed JSON caught in `SearchSource.run()`, reported as `ok: false` with an error string; other tabs unaffected |
-| MusicBrainz | none (keyless) | 1 req/sec, enforced by a process-wide `asyncio.Lock`-based limiter shared across all concurrent searches | Same isolation as above; the limiter adds latency, never a failure, under load |
-| Spotify | Client Credentials OAuth (app-only); token cached in-process, refreshed 30s before expiry | Spotify's own per-app limits, not separately throttled client-side | Token-fetch failure or search failure both isolated the same way; reports "Not configured" distinctly from a live failure when no client ID/secret is set |
-| Prowlarr | operator API key via `X-Api-Key` header | none (operator's own instance) | Same isolation; "Not configured" when no URL/key set |
+| Source       | Auth method                                                                               | Rate limit respected                                                                                     | Failure mode                                                                                                                                              |
+| ------------ | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Apple/iTunes | none (keyless)                                                                            | none published; not throttled client-side beyond the shared 30/min per-user search limit                 | Timeout/5xx/malformed JSON caught in `SearchSource.run()`, reported as `ok: false` with an error string; other tabs unaffected                            |
+| MusicBrainz  | none (keyless)                                                                            | 1 req/sec, enforced by a process-wide `asyncio.Lock`-based limiter shared across all concurrent searches | Same isolation as above; the limiter adds latency, never a failure, under load                                                                            |
+| Spotify      | Client Credentials OAuth (app-only); token cached in-process, refreshed 30s before expiry | Spotify's own per-app limits, not separately throttled client-side                                       | Token-fetch failure or search failure both isolated the same way; reports "Not configured" distinctly from a live failure when no client ID/secret is set |
+| Prowlarr     | operator API key via `X-Api-Key` header                                                   | none (operator's own instance)                                                                           | Same isolation; "Not configured" when no URL/key set                                                                                                      |
 
 All four run via `asyncio.gather(..., return_exceptions=True)` in
 `app.services.search.multi_source_search`, with each adapter's own `SearchSource.run()` already
@@ -143,7 +143,7 @@ case an adapter has a bug that raises during normalization.
   unconditionally. Verified by adversarial testing directly against the module.
 - Path traversal: `app.services.pathsafety.render_library_path` sanitizes every path component
   independently (strips separators, NUL/control characters, leading dots, wildcard characters,
-  truncates length) and then verifies the final *resolved* path is still inside the resolved
+  truncates length) and then verifies the final _resolved_ path is still inside the resolved
   library root before any filesystem write, as defense in depth on top of the component-level
   sanitization. Adversarially tested against `../../../etc/passwd`, absolute paths, NUL-byte
   injection, Windows-style paths, and 10,000-character inputs; every case stayed inside the
@@ -165,7 +165,7 @@ case an adapter has a bug that raises during normalization.
   fulfillment work is triggered downstream of it).
 - CSP: `default-src 'self'`, `script-src 'self'` (no inline scripts, no `unsafe-inline` for JS),
   `frame-ancestors 'none'`, plus `X-Content-Type-Options: nosniff`, `Referrer-Policy:
-  no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy` denying geolocation/mic/camera, on
+no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy` denying geolocation/mic/camera, on
   every response via middleware.
 - Dependency confusion: every keyless/OAuth third-party base URL (Apple, MusicBrainz, Spotify)
   is a hardcoded module-level constant, never derived from configuration or user input, so
@@ -200,6 +200,16 @@ case an adapter has a bug that raises during normalization.
   responses, not by inspection. Fixed to check both `"completed"` and `"succeeded"` appear in
   the state string, so a genuinely completed-but-errored transfer is correctly still not
   treated as fulfilled.
+- The multi-stage Docker build failed entirely: `backend/pyproject.toml` declared
+  `readme = "../README.md"`, which resolves fine when installing from the monorepo directly
+  (the file exists one directory up from `backend/`) but not inside the Dockerfile's
+  `backend-builder` stage, which only copies `backend/pyproject.toml` and `backend/app` into
+  the build context, so hatchling's metadata validation failed on a missing file mid-build.
+  Found by actually building the image (`docker build .`) rather than trusting that source
+  running locally implied the packaged build would work too. Fixed by dropping the `readme`
+  field; verified afterward with a full build, a container run against `/api/health`, a
+  successful `docker` `HEALTHCHECK` transition to `healthy`, and confirmation the process runs
+  as the intended non-root `cadence` (uid 10001) user.
 
 **Not covered / accepted low-risk gaps:**
 
@@ -261,32 +271,32 @@ case an adapter has a bug that raises during normalization.
 
 Backend (`backend/pyproject.toml`):
 
-| Package | Why |
-|---|---|
-| fastapi, uvicorn[standard] | Mission-specified web framework and ASGI server |
-| pydantic, pydantic-settings, email-validator | Request/response models and typed env-var config |
-| sqlalchemy, aiosqlite, alembic | Async ORM, SQLite driver, migration tooling (installed, not yet used - see gaps) |
-| httpx | Async HTTP client, wrapped by the custom SSRF-safe client |
-| passlib[argon2], argon2-cffi | Password hashing |
-| pyjwt | Session token signing/verification |
-| python-multipart | Required by FastAPI for form data (future-proofing; not currently exercised by any route) |
-| mutagen | Audio file tag reading/writing (MP3/FLAC) |
-| slowapi | Rate limiting |
-| tenacity | Bounded retry policy for outbound HTTP calls |
-| structlog | Structured JSON logging |
-| pytest, pytest-asyncio, pytest-cov, pytest-httpx, ruff, mypy, pip-audit, types-passlib | Dev/test/lint tooling only, not shipped in the runtime image |
+| Package                                                                                | Why                                                                                       |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| fastapi, uvicorn[standard]                                                             | Mission-specified web framework and ASGI server                                           |
+| pydantic, pydantic-settings, email-validator                                           | Request/response models and typed env-var config                                          |
+| sqlalchemy, aiosqlite, alembic                                                         | Async ORM, SQLite driver, migration tooling (installed, not yet used - see gaps)          |
+| httpx                                                                                  | Async HTTP client, wrapped by the custom SSRF-safe client                                 |
+| passlib[argon2], argon2-cffi                                                           | Password hashing                                                                          |
+| pyjwt                                                                                  | Session token signing/verification                                                        |
+| python-multipart                                                                       | Required by FastAPI for form data (future-proofing; not currently exercised by any route) |
+| mutagen                                                                                | Audio file tag reading/writing (MP3/FLAC)                                                 |
+| slowapi                                                                                | Rate limiting                                                                             |
+| tenacity                                                                               | Bounded retry policy for outbound HTTP calls                                              |
+| structlog                                                                              | Structured JSON logging                                                                   |
+| pytest, pytest-asyncio, pytest-cov, pytest-httpx, ruff, mypy, pip-audit, types-passlib | Dev/test/lint tooling only, not shipped in the runtime image                              |
 
 Web (`web/package.json`):
 
-| Package | Why |
-|---|---|
-| react, react-dom | UI framework |
-| react-router-dom | Client-side routing with auth-guarded routes |
-| @tanstack/react-query | Server-state caching and the polling behavior request history needs |
-| vite, @vitejs/plugin-react, typescript | Build tooling |
-| eslint + plugins, prettier | Lint/format, matching the repo's stated Python-equivalent tooling (ruff/black) |
-| vitest, @testing-library/react, @testing-library/jest-dom, @testing-library/user-event, jsdom | Component/unit testing |
-| @playwright/test | End-to-end testing |
+| Package                                                                                       | Why                                                                            |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| react, react-dom                                                                              | UI framework                                                                   |
+| react-router-dom                                                                              | Client-side routing with auth-guarded routes                                   |
+| @tanstack/react-query                                                                         | Server-state caching and the polling behavior request history needs            |
+| vite, @vitejs/plugin-react, typescript                                                        | Build tooling                                                                  |
+| eslint + plugins, prettier                                                                    | Lint/format, matching the repo's stated Python-equivalent tooling (ruff/black) |
+| vitest, @testing-library/react, @testing-library/jest-dom, @testing-library/user-event, jsdom | Component/unit testing                                                         |
+| @playwright/test                                                                              | End-to-end testing                                                             |
 
 A full generated `docs/PACKAGES.md` (gitignored, regenerate locally via the `packages` skill)
 was not generated as part of this session; noted as a next-step below.
