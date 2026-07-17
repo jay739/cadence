@@ -371,3 +371,202 @@ was not generated as part of this session; noted as a next-step below.
 Nothing was fully abandoned mid-implementation in this phase. The one meaningful scope
 narrowing was the Spotify personalization tab, addressed above as a known gap and a next step
 rather than an attempted-and-abandoned effort, since it was never started.
+
+## Addendum: Admin-editable integration settings (2026-07-17)
+
+This section covers the addition specified in `MISSION_settings_ui.md`: a database-backed,
+admin-editable settings store for the Prowlarr/qBittorrent/slskd/Spotify/library fields that
+previously only loaded from environment variables at boot. Phase 1's section above is
+unchanged and still describes the shipped baseline this addendum builds on.
+
+### What was built and why this shape
+
+**Database model**: a single `IntegrationSetting` table
+(`backend/app/models/integration_setting.py`), one row per `(integration, field_name)` pair,
+rather than one wide table with a fixed column per field. Chosen because: adding a field to an
+integration later (or a new integration entirely) becomes a data change, not a schema
+migration; masking/encryption is naturally a per-field concern here (`is_secret` is a column,
+not a naming convention spread across many columns, since some fields on the same integration
+are secrets and others aren't, e.g. `qbittorrent_url` vs `qbittorrent_password`); and a partial
+update from the admin UI (edit just one field) maps directly onto upserting a single row
+instead of a read-modify-write of a wide row. The trade-off, accepted deliberately: every
+stored value is a string (no per-column typing), which costs nothing here since every field in
+scope is already a string in `Settings`.
+
+**Encryption**: `backend/app/core/crypto.py` wraps Fernet (AES-128-CBC + HMAC-SHA256,
+authenticated, from the `cryptography` package, added as a new backend dependency) for
+encrypt/decrypt, plus a `mask_secret()` helper for API responses. The key is managed by a new
+`Settings.resolved_settings_encryption_key()` in `config.py`, extending the exact
+generate-and-persist pattern `resolved_session_secret()` already used (lazy-generate on first
+boot, written to a file under `DATA_DIR` with owner-only `0600` permissions), per the mission's
+explicit instruction not to invent a second secret-management mechanism. It is a **separate
+file** (`settings_encryption.key`, sibling to `session_secret.key`), not a key derived from
+`SESSION_SECRET`, because the two keys protect different things with different rotation
+implications: `SESSION_SECRET` signs JWTs, and rotating it just invalidates active sessions
+(cheap, users log in again); this key decrypts persisted integration credentials, and rotating
+it without a re-encryption pass would permanently strand every already-saved secret in the
+database. Keeping them independent means a future session-secret rotation can never
+accidentally brick saved Prowlarr/qBittorrent/slskd/Spotify credentials, and vice versa.
+
+**Precedence rule chosen: an environment variable, when set, always wins over a DB-stored
+value for the same field.** DB-stored values are the fallback/normal runtime path used
+whenever the env var is unset. Implemented in `backend/app/services/settings_store.py`
+(`get_effective_settings()`, `apply_effective_settings()`), with a `FIELD_REGISTRY` naming
+exactly the eleven fields in scope (`prowlarr_url`, `prowlarr_api_key`, `qbittorrent_url`,
+`qbittorrent_username`, `qbittorrent_password`, `slskd_url`, `slskd_api_key`,
+`spotify_client_id`, `spotify_client_secret`, `music_library_path`, `library_path_pattern`).
+Chosen over "DB overrides env once present" because: it matches the mission's framing of env
+vars as the bootstrap/override path (an operator who sets one is making a deliberate
+infrastructure decision that should not be silently shadowed by whatever was last clicked in a
+web form); it keeps every existing docker-compose-only deployment byte-for-byte unaffected,
+since nothing in the UI could ever race ahead of an env var that's already set, making this
+addition strictly additive; and it gives an operator a clean escape hatch if a UI-saved value
+is ever wrong or the encryption key is lost (unset the DB row, or just ignore it, and set the
+env var, which takes over immediately on the next request with no manual DB surgery). On boot,
+`seed_db_from_env_on_boot()` copies any currently-set env var into its DB row (only when the
+env var is actually set; it never clears a DB row just because an env var happens to be absent
+that boot), so the settings page can show "sourced from the environment" with the actual value
+rather than a blank field, and so a value survives if an operator later removes the env var to
+switch to UI-managed configuration.
+
+**Live refresh, replacing `get_settings()`'s cache for these fields only**:
+`apply_effective_settings()` takes the process's cached `Settings` object and returns a copy
+with only the registry fields overlaid from the fresh env-or-DB resolution, done via
+`model_copy(update=...)` and _only_ for fields where the resolver actually found a value.
+This is purely additive: a field with neither an env var nor a DB row keeps whatever the
+passed-in `Settings` object already carried (important for tests and any future non-HTTP
+caller that constructs `Settings` directly). Wired in at the three places that read these
+fields today, at their existing `session`-bearing call sites, with no signature break for
+existing callers: `app.services.search.multi_source_search` (session is now an optional
+parameter, defaulting to `None`, so the handful of unit tests that call it with a bare
+`Settings` and no DB still pass unchanged), `app.services.fulfillment.fulfill_request` (already
+received `session`, so the overlay is applied at the top of the function body, meaning even a
+long-running `FulfillmentWorker` picks up a mid-session settings save on its very next
+fulfillment pass), and `GET /api/health` (applied before computing `configured`/`reachable`
+booleans, skipped only in demo mode). No new process-wide cache was introduced; every call
+re-queries the (small, indexed) `integration_settings` table, which is the deliberate trade a
+mission explicitly asked for over `get_settings()`'s `lru_cache` for exactly these fields.
+
+### New routes, with validation and auth
+
+All under `backend/app/api/routes_settings.py`, prefix `/api/admin/settings`, guarded by the
+same `require_admin` dependency the existing approval-queue admin routes use (403 for a
+non-admin, 401 unauthenticated).
+
+| Method & path                                                          | Auth       | Validation                                                                                                                                              |
+| ---------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/admin/settings`                                              | admin only | n/a; every secret field masked (`mask_secret`, e.g. `••••••••ab12`), plus a `source` tag (`env`/`db`/`unset`) per field                                 |
+| `PUT /api/admin/settings/{prowlarr,qbittorrent,slskd,spotify,library}` | admin only | one Pydantic model per integration (`ProwlarrSettingsIn`, etc.), every field optional (omit = leave unchanged), length-capped                           |
+| `POST /api/admin/settings/{integration}/test`                          | admin only | 404 for an unknown integration name; makes exactly one outbound call via the existing `SafeHttpClient`, never persists anything, reports `{ok, detail}` |
+
+No new rate limit was added to these routes: they are admin-only (already the narrowest
+practical audience) and, unlike public auth/search endpoints, are not exposed to
+unauthenticated or general-user traffic, so a credential-stuffing/abuse rate limit does not
+apply the same way; this mirrors the existing approval-queue admin routes, which are likewise
+unrated-limited beyond their auth gate.
+
+### Test coverage added
+
+- **Unit** (`backend/tests/unit/`): `test_crypto.py` (encrypt/decrypt round trip, ciphertext
+  never contains the plaintext, wrong-key and tampered-ciphertext both raise a typed
+  `DecryptionError`, repeated encryption of the same value is non-deterministic, `mask_secret`
+  never leaks the real value); `test_settings_precedence.py` (field registry completeness and
+  scope, DB-only resolution, env-overrides-DB for both plain and secret fields,
+  `apply_effective_settings` is additive and never wipes a constructor-supplied value, the
+  core "no restart" guarantee proven directly by calling `apply_effective_settings` twice with
+  an `upsert_setting` in between, boot-time env-to-DB seeding); `test_settings_test_connection.py`
+  (all four per-integration checks, success/auth-failure/server-error/missing-fields, and an
+  unreachable-host case proving `SafeHttpError` from the DNS-check layer is turned into a
+  reported failure, never a raw exception).
+- **Integration** (`backend/tests/integration/`): `test_settings_routes.py` (non-admin
+  rejection on every route including test-connection, a saved secret's GET response is masked
+  and never contains the plaintext anywhere in the response body, partial updates leave
+  untouched fields alone, an env var visibly overrides a saved DB value in the GET response,
+  test-connection never persists regardless of outcome, unknown-integration 404s, oversized
+  input 422s); a new class in `test_fulfillment.py` proving the worker's actual read path
+  (`fulfill_request`, not just `/api/health`/`/api/search`) uses a Prowlarr connection that
+  exists _only_ as a DB row (no env var, no constructor override); `test_settings_takes_effect_live.py`,
+  the mission's required end-to-end proof, hits the real app instance through its HTTP routes
+  exactly as an admin's browser would: read `/api/health` (not configured), `PUT` a Prowlarr/
+  slskd connection through the settings API, read `/api/health` again in the same test (same
+  running app, same DB engine, no fixture re-entry, no cache clear) and confirm `configured`
+  flips to `true`; a further case in the same file proves the live `reachable` probe and the
+  `/api/search` fan-out both honor the DB-saved value too, not just the feature-detection
+  boolean.
+- **Web** (`web/src/`): `AdminSettingsPage.test.tsx` (all five integrations render grouped, a
+  masked secret is never pre-filled into its input's value, an env-sourced field renders
+  disabled with an explanatory note, the Save button stays disabled until a field is actually
+  edited and submits only the changed fields, Test connection surfaces its result message,
+  Library correctly has no Test-connection button); three new assertions added to
+  `client.test.ts` for the new `api.adminSettings.get/update/testConnection` methods.
+- **End-to-end** (`web/e2e/demo-flow.spec.ts`, Playwright against the real backend in demo
+  mode serving the real built client): a non-admin is redirected away from
+  `/admin/settings`; an admin opens the Settings page, sees all five integration sections,
+  edits and saves a Prowlarr field, and sees it reflected back tagged as saved (`db` source),
+  proving the real round trip through the browser rather than an optimistic local echo; a
+  Test-connection click against an unreachable demo host renders a result message rather than
+  hanging, timing out, or crashing the page.
+- **Full existing suite re-run**: backend 264 tests passing (was 202 before this addendum),
+  88% coverage (CI gate is 80%), ruff and mypy both clean; web 28 Vitest tests passing (was
+  19), lint and typecheck both clean; all 11 Playwright e2e tests passing (was 8); production
+  web build (`npm run build`) still succeeds. Nothing from Phase 1's suite was touched or
+  weakened to make this pass; the two places an existing test's assumption needed adjusting
+  were both cases where the test's `Settings(...)` fixture value or the test harness's own
+  `MUSIC_LIBRARY_PATH` env var was, correctly, no longer being silently bypassed by the new
+  precedence logic (documented inline in those tests).
+
+### Security checklist for this addition
+
+- Secrets are never returned unmasked once saved, in any route, including the update routes
+  (which echo back the fresh masked view, not the submitted plaintext).
+- Test-connection uses the existing `SafeHttpClient` exclusively (`POLICY_ALLOW_PRIVATE` for
+  Prowlarr/qBittorrent/slskd, matching how the live search/fulfillment code treats them;
+  `POLICY_PUBLIC_ONLY` for Spotify's token endpoint), so it inherits the same SSRF protections
+  (DNS resolved and re-checked before every attempt, link-local/metadata/loopback blocked) as
+  every other outbound call in the codebase. No second HTTP path was added.
+- Masking is verified at the full HTTP response level, not just the parsed field: integration
+  tests assert the raw response text (`resp.text`) never contains a saved secret's plaintext
+  anywhere, not only that the parsed `value` field is masked.
+- Every settings route requires `require_admin`; verified by tests for both an unauthenticated
+  caller (401) and an authenticated non-admin (403), on every route including test-connection.
+- Encryption key file (`settings_encryption.key`) follows the same 0600, `DATA_DIR`-relative,
+  gitignored-by-directory pattern as `session_secret.key`; never logged, never part of any API
+  response.
+
+### Known gaps
+
+1. **No rotation tooling for `settings_encryption.key`** (low-to-medium risk, same class of gap
+   Phase 1 already accepted for `SESSION_SECRET`/Alembic): if the key file is lost or
+   deliberately rotated, every previously saved secret becomes an unrecoverable
+   `DecryptionError` on read; `_load_db_values` degrades this to "value unavailable" (returns
+   `None` for that field) rather than crashing the settings page, but there is no admin-facing
+   "your saved Prowlarr key could not be decrypted, please re-enter it" messaging yet, just a
+   silently-empty field. Acceptable for a first pass; worth a follow-up if key rotation ever
+   becomes a real operational need.
+2. **Test-connection routes are not rate-limited.** They are admin-only, which is the main
+   mitigation, but an admin session with a compromised token could still be used to hammer an
+   internal Prowlarr/qBittorrent/slskd instance via repeated test-connection calls. Low risk in
+   a single-admin, self-hosted context, but noted honestly rather than silently.
+3. **`docs/PACKAGES.md`** still not generated (a pre-existing Phase 1 gap, not introduced by
+   this addendum, but the new `cryptography` dependency should be included whenever it is).
+4. **Web `types/api.ts` has one pre-existing line (`RequestStatus`, unrelated to this
+   addendum) that a newer Prettier version now reports as unformatted** (`format:check` warns
+   on it). This was already present, byte-for-byte, in the Phase 1 commit, so it was left
+   untouched rather than folded into this addition's diff; worth a dedicated formatting-only
+   commit later rather than fixing incidentally here.
+
+### Decisions made without asking (per the mission's "make the most sensible call" instruction)
+
+- One `IntegrationSetting` row per `(integration, field_name)` rather than one row/table per
+  integration: justified in "What was built" above.
+- A dedicated encryption key file, sibling to (not derived from) `SESSION_SECRET`: justified
+  above; the mission left this "your call" but was explicit that it must extend, not replace or
+  duplicate, the existing generate-and-persist mechanism, which this does structurally while
+  keeping the two keys' blast radii independent.
+- Env-always-wins precedence (vs. "DB overrides env once present"): justified above.
+- `music_library_path`/`library_path_pattern` included in the DB-backed registry alongside the
+  four integrations, per the mission's explicit item 1 listing; no additional non-credential
+  fields (e.g. fulfillment attempt budgets) were added to the registry, per the mission's
+  explicit scoping instruction.
+- No additional rate limit on the new admin routes, matching the existing approval-queue admin
+  routes' precedent (admin-only auth is the gate, not a request-rate budget).

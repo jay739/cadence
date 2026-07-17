@@ -20,6 +20,9 @@ one song, and nothing else should get touched.
 - Request it. Requesting an already-pending or already-fulfilled track just shows its current
   status instead of creating a duplicate.
 - An admin approves or rejects from a queue, with an optional note the requester sees.
+- An admin can also wire up Prowlarr/qBittorrent/slskd/Spotify and the library layout entirely
+  from a Settings page in the web UI, test each connection before saving, and have it take
+  effect immediately, no SSH access or `.env` editing required. Secrets are encrypted at rest.
 - On approval, Cadence tries your Prowlarr indexers first, grabs the best single-track match,
   and hands it to your existing qBittorrent. If nothing suitable turns up, it falls back to
   Soulseek via slskd. Either way, only the one requested file is ever touched.
@@ -56,6 +59,11 @@ search/browsing even with none of them configured, surfacing "not configured" ra
 failing to boot. Nothing here is ever sent to or callable from the browser; the web client
 only ever talks to Cadence's own API.
 
+The Prowlarr/qBittorrent/slskd/Spotify/library rows below can also be set, or changed, from the
+admin Settings page in the web UI instead of editing `.env`, with no restart needed. An
+environment variable, when set, always takes precedence over a value saved through the UI, so
+a docker-compose deployment that only ever uses env vars keeps working exactly as before.
+
 | Variable                                                            | Purpose                                                                                                                                                                                                                    |
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DEMO_MODE`                                                         | `true` seeds fake search results and a fake request queue, zero external calls.                                                                                                                                            |
@@ -88,6 +96,11 @@ default, since one container serves both), no CORS configuration is needed.
 - The library file-move/tag-writing step sanitizes every path component and verifies the final
   resolved path never escapes `MUSIC_LIBRARY_PATH`, even under adversarial titles/artists.
 - No secret is ever committed to this repository; see `.env.example`.
+- Integration secrets saved through the admin Settings page are encrypted at rest in the
+  SQLite database (never plaintext) using a key generated on first boot and persisted with
+  owner-only permissions, the same pattern `SESSION_SECRET` uses. The settings API masks every
+  secret in its responses (e.g. `••••••••ab12`), and admin-only routes guard both reading and
+  updating them.
 - Full detail, including an honest covered/not-covered checklist, is in
   [REPORT.md](REPORT.md).
 
