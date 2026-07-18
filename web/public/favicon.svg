@@ -1,7 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
-  <circle cx="24" cy="24" r="22" fill="#15130f" />
-  <circle cx="24" cy="24" r="18" fill="none" stroke="#33302a" stroke-width="1.5" />
-  <circle cx="24" cy="24" r="13" fill="none" stroke="#33302a" stroke-width="1.5" />
-  <circle cx="24" cy="24" r="7" fill="#e0a12e" />
-  <circle cx="24" cy="24" r="2.2" fill="#15130f" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect x="0" y="0" width="512" height="512" fill="#15130f"/>
+
+  <g id="icon">
+    <rect x="41" y="26" width="430" height="460" rx="28" fill="#1e1b16"/>
+
+    <radialGradient id="noteGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f0b64a" stop-opacity="0.55"/>
+      <stop offset="55%" stop-color="#e0a12e" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#e0a12e" stop-opacity="0"/>
+    </radialGradient>
+    <circle cx="256" cy="256" r="145" fill="url(#noteGlow)"/>
+
+    <g id="corner-brackets" fill="none" stroke="#ede6da" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 89 150 L 89 96 L 143 96"/>
+      <path d="M 369 96 L 423 96 L 423 150"/>
+      <path d="M 423 362 L 423 416 L 369 416"/>
+      <path d="M 143 416 L 89 416 L 89 362"/>
+    </g>
+
+    <g id="eighth-note" fill="#e0a12e">
+      <ellipse cx="233" cy="330" rx="46" ry="34" transform="rotate(-18 233 330)"/>
+      <rect x="271" y="140" width="22" height="196" rx="8"/>
+      <path d="M 293 140
+               C 311 160, 351 168, 359 210
+               C 364 236, 353 258, 333 268
+               C 347 240, 341 214, 319 198
+               C 303 187, 291 178, 293 158
+               Z" fill="#f0b64a"/>
+    </g>
+  </g>
 </svg>

@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
+import { BrandMark } from "./BrandMark";
 import "./AppShell.css";
 
 export function AppShell() {
@@ -9,7 +10,7 @@ export function AppShell() {
     <div className="shell">
       <header className="shell__header">
         <div className="shell__brand">
-          <span className="shell__brand-mark" aria-hidden="true" />
+          <BrandMark size={28} />
           <span className="shell__brand-text">Cadence</span>
         </div>
         <nav className="shell__nav" aria-label="Primary">
