@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { SearchSourceName, TrackResult } from "../types/api";
@@ -129,12 +129,30 @@ function SearchResultsPanel({
   );
 }
 
+// As-you-type tuning: long enough that a fast typist doesn't fire a stream per keystroke,
+// short enough that results feel immediate once they pause; 2-char minimum keeps one-letter
+// junk queries from fanning out to four real APIs.
+const SEARCH_DEBOUNCE_MS = 400;
+const MIN_SEARCH_CHARS = 2;
+
 export function SearchPage() {
   const [query, setQuery] = useState("");
-  const [submittedQuery, setSubmittedQuery] = useState("");
+  const [activeQuery, setActiveQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("apple");
   const [requestStates, setRequestStates] = useState<Record<string, RequestState>>({});
   const queryClient = useQueryClient();
+  const debounceTimer = useRef<number | null>(null);
+
+  // Cleanup-only effect: a pending debounce timer must not fire after unmount. All setState
+  // calls live in event handlers and the timer callback, never in an effect body, per this
+  // project's strict react-hooks v7 lint rules.
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current !== null) {
+        window.clearTimeout(debounceTimer.current);
+      }
+    };
+  }, []);
 
   const requestMutation = useMutation({
     mutationFn: (track: TrackResult) =>
@@ -162,9 +180,25 @@ export function SearchPage() {
     }
   }
 
+  function handleQueryChange(next: string) {
+    setQuery(next);
+    if (debounceTimer.current !== null) {
+      window.clearTimeout(debounceTimer.current);
+    }
+    const trimmed = next.trim();
+    debounceTimer.current = window.setTimeout(() => {
+      setActiveQuery(trimmed.length >= MIN_SEARCH_CHARS ? trimmed : "");
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    setSubmittedQuery(query.trim());
+    // Instant flush: pressing Enter or the button skips the debounce wait, and also allows a
+    // deliberate one-character search the as-you-type minimum would otherwise hold back.
+    if (debounceTimer.current !== null) {
+      window.clearTimeout(debounceTimer.current);
+    }
+    setActiveQuery(query.trim());
   }
 
   return (
@@ -172,18 +206,18 @@ export function SearchPage() {
       <div className="page-header">
         <h1>Find a track</h1>
         <p>
-          Search runs across four sources at once. Pick the right result, complete with source badge
-          and art, and request just that one recording.
+          Results appear as you type, across four sources at once. Pick the right result, complete
+          with source badge and art, and request just that one recording.
         </p>
       </div>
 
       <form className="search-form" onSubmit={handleSubmit}>
         <input
           type="search"
-          placeholder="Track title or artist"
+          placeholder="Start typing a track title or artist…"
           aria-label="Search for a track"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => handleQueryChange(e.target.value)}
         />
         <button type="submit" className="button button--primary" disabled={!query.trim()}>
           Search
@@ -191,8 +225,8 @@ export function SearchPage() {
       </form>
 
       <SearchResultsPanel
-        key={submittedQuery}
-        query={submittedQuery}
+        key={activeQuery}
+        query={activeQuery}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onRequest={handleRequest}

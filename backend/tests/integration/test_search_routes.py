@@ -155,16 +155,23 @@ class TestSearchStream:
         assert resp.status_code == 422
 
     async def test_rate_limited_after_threshold(self, demo_app_client):
+        """The stream endpoint's budget (60/min) is deliberately double the batch endpoint's,
+        since search-as-you-type fires several debounced requests per typed query; 65 calls
+        must still trip it.
+        """
         headers = await register_and_login(
             demo_app_client, "streamratelimit@example.com", "a-strong-password-1"
         )
         statuses = []
-        for _ in range(35):
+        for _ in range(65):
             resp = await demo_app_client.get(
                 "/api/search/stream", params={"q": "test"}, headers=headers
             )
             statuses.append(resp.status_code)
         assert 429 in statuses
+        # The batch budget (30/min) must NOT have leaked onto this route: the first 35
+        # requests would already contain a 429 if it had.
+        assert 429 not in statuses[:35]
 
 
 class TestSearchStreamLiveMode:

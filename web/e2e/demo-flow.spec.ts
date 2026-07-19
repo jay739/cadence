@@ -24,10 +24,13 @@ test.describe("Demo mode: search", () => {
   test("searching shows results across every source tab", async ({ page }) => {
     await login(page, USER_EMAIL, USER_PASSWORD);
 
+    // No Search click: results must appear on their own once the ~400ms typing debounce
+    // settles (as-you-type over the SSE stream). Playwright's auto-waiting expect covers the
+    // debounce window without an explicit sleep.
     await page.getByRole("searchbox").fill("Tum Hi Ho");
-    await page.getByRole("button", { name: "Search" }).click();
 
     await expect(page.getByRole("tablist")).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Apple \d/ })).toBeVisible();
 
     for (const tabName of ["Apple", "MusicBrainz", "Spotify", "Prowlarr"]) {
       // Each tab's accessible name is "<Label> <result count>" (e.g. "Apple 5"), so this must

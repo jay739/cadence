@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_app_settings, get_current_user, get_db
 from app.core.config import Settings
-from app.core.limiter import SEARCH_RATE_LIMIT, limiter
+from app.core.limiter import SEARCH_RATE_LIMIT, SEARCH_STREAM_RATE_LIMIT, limiter
 from app.models.user import User
 from app.schemas.search import MultiSearchResponse
 from app.services.search import multi_source_search, stream_source_results
@@ -29,7 +29,7 @@ async def search_tracks(
 
 
 @router.get("/stream")
-@limiter.limit(SEARCH_RATE_LIMIT)
+@limiter.limit(SEARCH_STREAM_RATE_LIMIT)
 async def search_tracks_stream(
     request: Request,
     q: str = Query(..., min_length=1, max_length=300),

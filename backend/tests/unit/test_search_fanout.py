@@ -68,3 +68,56 @@ class TestMultiSourceSearchLiveModeIsolation:
         by_source = {s.source: s for s in result.sources}
         assert by_source["apple"].ok is False
         assert by_source["musicbrainz"].ok is True
+
+
+class TestStreamCancellation:
+    async def test_closing_the_stream_early_cancels_still_pending_sources(
+        self, monkeypatch
+    ):
+        """With search-as-you-type, every keystroke abandons the previous stream; the
+        still-pending source tasks must be cancelled on generator close, not left running to
+        completion in the background (where MusicBrainz's process-wide 1-req/sec limiter would
+        keep serving stale queries ahead of the live one).
+        """
+        import asyncio
+
+        from app.schemas.search import TrackResult
+        from app.search_sources.base import SearchSource
+        from app.services import search as search_module
+        from app.services.search import stream_source_results
+
+        class InstantSource(SearchSource):
+            name = "instant"
+
+            async def _search(self, query: str, *, limit: int) -> list[TrackResult]:
+                return []
+
+        class HangingSource(SearchSource):
+            name = "hanging"
+            cancelled = False
+
+            async def _search(self, query: str, *, limit: int) -> list[TrackResult]:
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    type(self).cancelled = True
+                    raise
+                return []
+
+        hanging = HangingSource()
+
+        async def fake_resolved_sources(settings, session):
+            return settings, [InstantSource(), hanging]
+
+        monkeypatch.setattr(search_module, "_resolved_sources", fake_resolved_sources)
+
+        settings = Settings(DEMO_MODE=False, SESSION_SECRET="x" * 40)
+        stream = stream_source_results("test query", settings, None)
+
+        first = await stream.__anext__()
+        assert first.source == "instant"
+
+        # Client walks away after the first event; aclose() drives the generator's finally
+        # block, which must cancel (and reap) the hanging task before returning.
+        await stream.aclose()
+        assert HangingSource.cancelled is True

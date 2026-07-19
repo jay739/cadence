@@ -142,5 +142,18 @@ async def stream_source_results(
         asyncio.ensure_future(_run_source_safely(source, query, limit))
         for source in sources
     ]
-    for coro in asyncio.as_completed(tasks):
-        yield await coro
+    try:
+        for coro in asyncio.as_completed(tasks):
+            yield await coro
+    finally:
+        # A client abandoning the stream mid-flight (with search-as-you-type, every keystroke
+        # abandons the previous stream) closes this generator at the suspended yield; without
+        # cancelling here, the still-pending source tasks would run to completion in the
+        # background, and in MusicBrainz's case keep consuming its process-wide 1-req/sec
+        # budget on a query nobody is waiting for anymore, delaying the query they ARE
+        # waiting for. CancelledError passes through SearchSource.run()'s broad `except
+        # Exception` untouched (it is a BaseException), so cancellation lands cleanly.
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
