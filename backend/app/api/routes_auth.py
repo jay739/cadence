@@ -37,7 +37,7 @@ def _issue_token_response(
         COOKIE_NAME,
         token,
         httponly=True,
-        secure=True,
+        secure=settings.cookie_secure,
         samesite="lax",
         max_age=settings.session_ttl_minutes * 60,
         path="/",

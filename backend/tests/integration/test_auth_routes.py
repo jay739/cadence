@@ -141,3 +141,42 @@ class TestLogout:
     async def test_logout_clears_cookie(self, app_client):
         resp = await app_client.post("/api/auth/logout")
         assert resp.status_code == 204
+
+
+class TestCookieSecureKnob:
+    async def test_cookie_is_secure_by_default(self, demo_app_client):
+        resp = await demo_app_client.post(
+            "/api/auth/register",
+            json={"email": "securecookie@example.com", "password": "a-strong-password-1"},
+        )
+        assert resp.status_code == 201
+        set_cookie = resp.headers["set-cookie"]
+        assert "Secure" in set_cookie
+
+    async def test_cookie_secure_can_be_disabled_for_plain_http_deploys(
+        self, tmp_path, monkeypatch
+    ):
+        """COOKIE_SECURE=false exists for LAN/Tailscale plain-HTTP deployments, where a Secure
+        cookie is never transmitted by the browser, which silently breaks the two cookie-auth
+        flows (Spotify OAuth redirect, streaming search) while Bearer-token flows keep working.
+        """
+        from app.core.config import get_settings
+        from app.main import create_app
+        from tests.integration.conftest import _run_with_lifespan, _set_test_env
+
+        _set_test_env(monkeypatch, tmp_path, demo_mode=True)
+        monkeypatch.setenv("COOKIE_SECURE", "false")
+        get_settings.cache_clear()
+        app = create_app()
+        async for client in _run_with_lifespan(app):
+            resp = await client.post(
+                "/api/auth/register",
+                json={"email": "plainhttp@example.com", "password": "a-strong-password-1"},
+            )
+            assert resp.status_code == 201
+            set_cookie = resp.headers["set-cookie"]
+            assert "cadence_session=" in set_cookie
+            assert "Secure" not in set_cookie
+            # HttpOnly must survive the knob: only the Secure attribute is configurable.
+            assert "HttpOnly" in set_cookie
+        get_settings.cache_clear()

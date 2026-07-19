@@ -33,6 +33,10 @@ def _set_test_env(monkeypatch, tmp_path, *, demo_mode: bool = False) -> None:
         "SESSION_SECRET", "test-session-secret-value-not-real-32bytes-long"
     )
     monkeypatch.setenv("MUSIC_LIBRARY_PATH", str(tmp_path / "library"))
+    # Pin the cookie flag explicitly: pydantic-settings also reads backend/.env (a gitignored
+    # local dev file that may legitimately set COOKIE_SECURE=false for plain-HTTP serving),
+    # and tests must not inherit whatever a developer's local file happens to contain.
+    monkeypatch.setenv("COOKIE_SECURE", "true")
     monkeypatch.delenv("ADMIN_BOOTSTRAP_EMAIL", raising=False)
     monkeypatch.delenv("ADMIN_BOOTSTRAP_PASSWORD", raising=False)
     monkeypatch.delenv("PROWLARR_URL", raising=False)

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
         default=None, alias="ADMIN_BOOTSTRAP_PASSWORD"
     )
     session_ttl_minutes: int = Field(default=60 * 24 * 7, alias="SESSION_TTL_MINUTES")
+    # Secure-by-default: the session cookie carries auth for the OAuth redirect flow and the
+    # streaming search (EventSource cannot send an Authorization header), and browsers only
+    # transmit Secure cookies over HTTPS or on localhost. Operators serving plain HTTP on a
+    # LAN/Tailscale IP (no reverse proxy yet) must set COOKIE_SECURE=false or those two flows
+    # fail with "Not authenticated" while everything Bearer-token-based still works.
+    cookie_secure: bool = Field(default=True, alias="COOKIE_SECURE")
 
     # --- Prowlarr ---
     prowlarr_url: str | None = Field(default=None, alias="PROWLARR_URL")
