@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import type { SearchSourceName, TrackResult } from "../types/api";
 import { TrackCard } from "../components/TrackCard";
+import { SpotifyPersonalizationPanel } from "../components/SpotifyPersonalizationPanel";
 import "./SearchPage.css";
 
 const SOURCE_TABS: { key: SearchSourceName; label: string }[] = [
@@ -12,12 +13,17 @@ const SOURCE_TABS: { key: SearchSourceName; label: string }[] = [
   { key: "prowlarr", label: "Prowlarr" },
 ];
 
+// Not a search source: an always-available quick-pick browse of the signed-in user's own
+// Spotify library (opt-in, separate OAuth connection), additive to the four search tabs above.
+const YOUR_SPOTIFY_TAB = "your-spotify" as const;
+
 type RequestState = "idle" | "requesting" | "requested" | "error";
+type ActiveTab = SearchSourceName | typeof YOUR_SPOTIFY_TAB;
 
 export function SearchPage() {
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<SearchSourceName>("apple");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("apple");
   const [requestStates, setRequestStates] = useState<Record<string, RequestState>>({});
   const queryClient = useQueryClient();
 
@@ -62,7 +68,10 @@ export function SearchPage() {
     setSubmittedQuery(query.trim());
   }
 
-  const activeSource = searchQuery.data?.sources.find((s) => s.source === activeTab);
+  const activeSource =
+    activeTab === YOUR_SPOTIFY_TAB
+      ? undefined
+      : searchQuery.data?.sources.find((s) => s.source === activeTab);
 
   return (
     <div>
@@ -87,36 +96,47 @@ export function SearchPage() {
         </button>
       </form>
 
-      {submittedQuery && (
-        <>
-          <div className="search-tabs" role="tablist" aria-label="Search sources">
-            {SOURCE_TABS.map((tab) => {
-              const source = searchQuery.data?.sources.find((s) => s.source === tab.key);
-              const count = source?.results.length ?? 0;
-              const failed = source && !source.ok;
-              return (
-                <button
-                  key={tab.key}
-                  role="tab"
-                  aria-selected={activeTab === tab.key}
-                  className={`search-tabs__tab ${activeTab === tab.key ? "search-tabs__tab--active" : ""}`}
-                  onClick={() => setActiveTab(tab.key)}
-                  type="button"
-                >
-                  {tab.label}
-                  {searchQuery.isSuccess && (
-                    <span
-                      className={`search-tabs__count ${failed ? "search-tabs__count--error" : ""}`}
-                    >
-                      {failed ? "—" : count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+      <div className="search-tabs" role="tablist" aria-label="Search sources">
+        {SOURCE_TABS.map((tab) => {
+          const source = searchQuery.data?.sources.find((s) => s.source === tab.key);
+          const count = source?.results.length ?? 0;
+          const failed = source && !source.ok;
+          return (
+            <button
+              key={tab.key}
+              role="tab"
+              aria-selected={activeTab === tab.key}
+              className={`search-tabs__tab ${activeTab === tab.key ? "search-tabs__tab--active" : ""}`}
+              onClick={() => setActiveTab(tab.key)}
+              type="button"
+            >
+              {tab.label}
+              {submittedQuery && searchQuery.isSuccess && (
+                <span className={`search-tabs__count ${failed ? "search-tabs__count--error" : ""}`}>
+                  {failed ? "—" : count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <button
+          role="tab"
+          aria-selected={activeTab === YOUR_SPOTIFY_TAB}
+          className={`search-tabs__tab ${activeTab === YOUR_SPOTIFY_TAB ? "search-tabs__tab--active" : ""}`}
+          onClick={() => setActiveTab(YOUR_SPOTIFY_TAB)}
+          type="button"
+        >
+          Your Spotify
+        </button>
+      </div>
 
-          <div className="card search-results" role="tabpanel">
+      <div className="card search-results" role="tabpanel">
+        {activeTab === YOUR_SPOTIFY_TAB ? (
+          <SpotifyPersonalizationPanel onRequest={handleRequest} requestStates={requestStates} />
+        ) : !submittedQuery ? (
+          <div className="empty-state">Search for a track to see results here.</div>
+        ) : (
+          <>
             {searchQuery.isLoading && <p>Searching every source…</p>}
             {searchQuery.isError && (
               <p className="form-error">
@@ -146,9 +166,9 @@ export function SearchPage() {
                 ))}
               </ul>
             )}
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

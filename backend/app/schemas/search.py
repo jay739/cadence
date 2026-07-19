@@ -42,8 +42,3 @@ class SourceSearchResult(BaseModel):
 class MultiSearchResponse(BaseModel):
     query: str
     sources: list[SourceSearchResult]
-
-
-class SpotifyConnectStatus(BaseModel):
-    connected: bool
-    display_name: str | None = None

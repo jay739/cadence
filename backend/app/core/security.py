@@ -68,3 +68,42 @@ def decode_session_token(token: str, *, secret: str) -> dict[str, Any]:
         raise SessionTokenError("Session expired") from exc
     except jwt.InvalidTokenError as exc:
         raise SessionTokenError("Invalid session token") from exc
+
+
+class OAuthStateError(Exception):
+    pass
+
+
+def create_oauth_state_token(
+    *, user_id: str, secret: str, ttl_minutes: int = 10
+) -> str:
+    """Sign a short-lived, single-purpose token binding an OAuth redirect to the user who
+
+    started it. The Spotify Authorization Code callback is a top-level browser navigation with
+    no Authorization header or session cookie context guaranteed usable across the redirect, so
+    the `state` query param is what proves the callback belongs to the session that initiated
+    it (standard OAuth CSRF protection) and identifies which user to attach the tokens to.
+    """
+    now = datetime.now(UTC)
+    payload: dict[str, Any] = {
+        "sub": user_id,
+        "purpose": "spotify_oauth_state",
+        "iat": now,
+        "exp": now + timedelta(minutes=ttl_minutes),
+    }
+    return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
+
+
+def decode_oauth_state_token(token: str, *, secret: str) -> str:
+    """Return the user_id bound to a valid, unexpired state token, or raise OAuthStateError."""
+    try:
+        payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError as exc:
+        raise OAuthStateError(
+            "OAuth state expired, please try connecting again"
+        ) from exc
+    except jwt.InvalidTokenError as exc:
+        raise OAuthStateError("Invalid OAuth state") from exc
+    if payload.get("purpose") != "spotify_oauth_state":
+        raise OAuthStateError("Invalid OAuth state")
+    return payload["sub"]

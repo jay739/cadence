@@ -49,12 +49,7 @@ export interface MultiSearchResponse {
 }
 
 export type RequestStatus =
-  | "pending"
-  | "approved"
-  | "downloading"
-  | "fulfilled"
-  | "rejected"
-  | "failed";
+  "pending" | "approved" | "downloading" | "fulfilled" | "rejected" | "failed";
 
 export interface RequestRecord {
   id: string;
@@ -157,4 +152,22 @@ export type SettingsIntegrationName = "prowlarr" | "qbittorrent" | "slskd" | "sp
 export interface TestConnectionResult {
   ok: boolean;
   detail: string;
+}
+
+// --- Opt-in per-user Spotify personalization (mirrors
+// backend/app/schemas/spotify_personalization.py) ---
+
+export interface SpotifyConnectionStatus {
+  connected: boolean;
+  display_name: string | null;
+}
+
+export interface SpotifyPlaylistSummary {
+  id: string;
+  name: string;
+  track_count: number;
+}
+
+export interface SpotifyPlaylistsResponse {
+  playlists: SpotifyPlaylistSummary[];
 }

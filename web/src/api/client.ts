@@ -8,7 +8,10 @@ import type {
   RequestRecord,
   SearchSourceName,
   SettingsIntegrationName,
+  SpotifyConnectionStatus,
+  SpotifyPlaylistsResponse,
   TestConnectionResult,
+  TrackResult,
   User,
 } from "../types/api";
 
@@ -141,5 +144,17 @@ export const api = {
         method: "POST",
         body: JSON.stringify(fields),
       }),
+  },
+  spotifyPersonalization: {
+    status: () => request<SpotifyConnectionStatus>("/api/spotify/status"),
+    // A real top-level navigation, not a fetch: Spotify's own authorize page can't be reached
+    // via XHR/fetch (it's a full-page redirect chain ending back at our /callback), so this
+    // just hands the browser the URL to go to rather than returning a parsed response.
+    connectUrl: () => `${API_BASE}/api/spotify/connect`,
+    disconnect: () => request<void>("/api/spotify/disconnect", { method: "POST" }),
+    savedTracks: () => request<TrackResult[]>("/api/spotify/library/saved-tracks"),
+    playlists: () => request<SpotifyPlaylistsResponse>("/api/spotify/library/playlists"),
+    playlistTracks: (playlistId: string) =>
+      request<TrackResult[]>(`/api/spotify/library/playlists/${playlistId}/tracks`),
   },
 };

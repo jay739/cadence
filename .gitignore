@@ -20,6 +20,9 @@ web/test-results/
 web/playwright-report/
 backend/static/
 
+# Vendored local toolchains (e.g. a newer Node than the machine's shared nvm provides)
+.toolchain/
+
 # Env and secrets
 .env
 .env.local

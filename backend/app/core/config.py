@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     # --- CORS / web origin (same-origin by default; only set if serving cross-origin) ---
     cors_allow_origins: str = Field(default="", alias="CORS_ALLOW_ORIGINS")
 
+    # --- Public base URL, needed to build the Spotify OAuth redirect_uri ---
+    app_base_url: str | None = Field(default=None, alias="APP_BASE_URL")
+
     @field_validator("music_library_path", "data_dir")
     @classmethod
     def _resolve_path(cls, v: str) -> str:

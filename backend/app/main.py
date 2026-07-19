@@ -22,6 +22,9 @@ from app.api.routes_health import router as health_router
 from app.api.routes_requests import router as requests_router
 from app.api.routes_search import router as search_router
 from app.api.routes_settings import router as settings_router
+from app.api.routes_spotify_personalization import (
+    router as spotify_personalization_router,
+)
 from app.core.config import get_settings
 from app.core.limiter import limiter
 from app.core.middleware import SecurityHeadersMiddleware
@@ -147,6 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(search_router)
     app.include_router(requests_router)
     app.include_router(settings_router)
+    app.include_router(spotify_personalization_router)
 
     static_dir = Path(__file__).resolve().parent.parent / "static"
     if static_dir.exists():

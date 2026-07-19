@@ -30,13 +30,22 @@ test.describe("Demo mode: search", () => {
     await expect(page.getByRole("tablist")).toBeVisible();
 
     for (const tabName of ["Apple", "MusicBrainz", "Spotify", "Prowlarr"]) {
-      await page.getByRole("tab", { name: new RegExp(tabName) }).click();
+      // Each tab's accessible name is "<Label> <result count>" (e.g. "Apple 5"), so this must
+      // anchor to the start of the name; a loose /Spotify/ would also match the separate,
+      // always-present "Your Spotify" personalization tab.
+      await page.getByRole("tab", { name: new RegExp(`^${tabName} `) }).click();
       await expect(page.getByRole("tabpanel")).toBeVisible();
       // Demo mode guarantees at least one result on the seeded sources for a matched query,
       // or an explicit empty-state / error message -- either way the tab must render something.
       const panel = page.getByRole("tabpanel");
       await expect(panel).not.toBeEmpty();
     }
+
+    // "Your Spotify" is a standing personalization tab, not a per-query search source, reused
+    // from this same logged-in session rather than spending another login() call on it (the
+    // auth rate limit is shared across every test in this file, one backend process).
+    await page.getByRole("tab", { name: "Your Spotify" }).click();
+    await expect(page.getByRole("link", { name: "Connect Spotify" })).toBeVisible();
   });
 });
 
