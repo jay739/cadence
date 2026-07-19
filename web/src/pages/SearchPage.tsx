@@ -141,6 +141,7 @@ export function SearchPage() {
   const [requestStates, setRequestStates] = useState<Record<string, RequestState>>({});
   const queryClient = useQueryClient();
   const debounceTimer = useRef<number | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   // Cleanup-only effect: a pending debounce timer must not fire after unmount. All setState
   // calls live in event handlers and the timer callback, never in an effect body, per this
@@ -153,8 +154,30 @@ export function SearchPage() {
     };
   }, []);
 
+  // "/" focuses search from anywhere on the page, the same convention GitHub/Slack/etc. use,
+  // skipped while the user is already typing in any input/textarea (including this one) so a
+  // literal "/" in a query or note is never intercepted.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "/") return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const requestMutation = useMutation({
-    mutationFn: ({ track, preferredFormat }: { track: TrackResult; preferredFormat: PreferredFormat }) =>
+    mutationFn: ({
+      track,
+      preferredFormat,
+    }: {
+      track: TrackResult;
+      preferredFormat: PreferredFormat;
+    }) =>
       api.requests.create({
         source: track.source,
         source_id: track.source_id,
@@ -213,8 +236,9 @@ export function SearchPage() {
 
       <form className="search-form" onSubmit={handleSubmit}>
         <input
+          ref={searchInputRef}
           type="search"
-          placeholder="Start typing a track title or artist…"
+          placeholder="Start typing a track title or artist… (press / to focus)"
           aria-label="Search for a track"
           value={query}
           onChange={(e) => handleQueryChange(e.target.value)}

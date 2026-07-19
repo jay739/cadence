@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -6,8 +7,15 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { SearchPage } from "./pages/SearchPage";
 import { MyRequestsPage } from "./pages/MyRequestsPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
-import { AdminQueuePage } from "./pages/AdminQueuePage";
-import { AdminSettingsPage } from "./pages/AdminSettingsPage";
+
+// Code-split: only an admin ever navigates here, so their JS should not ship in the bundle
+// every regular listener downloads and parses on first load.
+const AdminQueuePage = lazy(() =>
+  import("./pages/AdminQueuePage").then((m) => ({ default: m.AdminQueuePage })),
+);
+const AdminSettingsPage = lazy(() =>
+  import("./pages/AdminSettingsPage").then((m) => ({ default: m.AdminSettingsPage })),
+);
 
 function App() {
   return (
@@ -28,7 +36,9 @@ function App() {
           path="/admin"
           element={
             <ProtectedRoute requireAdmin>
-              <AdminQueuePage />
+              <Suspense fallback={<p>Loading…</p>}>
+                <AdminQueuePage />
+              </Suspense>
             </ProtectedRoute>
           }
         />
@@ -36,7 +46,9 @@ function App() {
           path="/admin/settings"
           element={
             <ProtectedRoute requireAdmin>
-              <AdminSettingsPage />
+              <Suspense fallback={<p>Loading…</p>}>
+                <AdminSettingsPage />
+              </Suspense>
             </ProtectedRoute>
           }
         />

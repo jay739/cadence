@@ -126,3 +126,30 @@ describe("SearchPage as-you-type", () => {
     expect(FakeEventSource.instances[0].url).toContain("q=arijit");
   });
 });
+
+describe("SearchPage '/' shortcut", () => {
+  beforeEach(() => {
+    FakeEventSource.instances = [];
+  });
+
+  it("focuses the search box when '/' is pressed anywhere on the page", () => {
+    renderSearchPage();
+    const searchbox = screen.getByRole("searchbox");
+    expect(searchbox).not.toHaveFocus();
+
+    fireEvent.keyDown(document.body, { key: "/" });
+
+    expect(searchbox).toHaveFocus();
+  });
+
+  it("does not intercept '/' typed inside the search box itself", () => {
+    renderSearchPage();
+    const searchbox = screen.getByRole("searchbox");
+    searchbox.focus();
+
+    fireEvent.keyDown(searchbox, { key: "/" });
+    typeQuery("ac/dc");
+
+    expect(searchbox).toHaveValue("ac/dc");
+  });
+});
