@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { BrandMark } from "./BrandMark";
+import { SetupBanner } from "./SetupBanner";
 import "./AppShell.css";
 
 export function AppShell() {
@@ -42,6 +43,7 @@ export function AppShell() {
           ) : null}
         </div>
       </header>
+      {user?.role === "admin" && <SetupBanner />}
       <main className="shell__main">
         <Outlet />
       </main>
