@@ -24,6 +24,13 @@ test.describe("Demo mode: search", () => {
   test("searching shows results across every source tab", async ({ page }) => {
     await login(page, USER_EMAIL, USER_PASSWORD);
 
+    // Before any query: the Spotify tab doubles as the user's own connection surface. Demo
+    // mode has no Spotify app configured server-side, so it must explain that instead of
+    // offering a Connect button that would dead-end.
+    await page.getByRole("tab", { name: "Spotify" }).click();
+    await expect(page.getByText(/isn't set up on this server yet/i)).toBeVisible();
+    await page.getByRole("tab", { name: "Apple" }).click();
+
     // No Search click: results must appear on their own once the ~400ms typing debounce
     // settles (as-you-type over the SSE stream). Playwright's auto-waiting expect covers the
     // debounce window without an explicit sleep.
@@ -33,9 +40,8 @@ test.describe("Demo mode: search", () => {
     await expect(page.getByRole("tab", { name: /^Apple \d/ })).toBeVisible();
 
     for (const tabName of ["Apple", "MusicBrainz", "Spotify", "Prowlarr"]) {
-      // Each tab's accessible name is "<Label> <result count>" (e.g. "Apple 5"), so this must
-      // anchor to the start of the name; a loose /Spotify/ would also match the separate,
-      // always-present "Your Spotify" personalization tab.
+      // Each tab's accessible name is "<Label> <result count>" (e.g. "Apple 5") once a query
+      // is active, so anchor to the start of the name.
       await page.getByRole("tab", { name: new RegExp(`^${tabName} `) }).click();
       await expect(page.getByRole("tabpanel")).toBeVisible();
       // Demo mode guarantees at least one result on the seeded sources for a matched query,
@@ -43,12 +49,6 @@ test.describe("Demo mode: search", () => {
       const panel = page.getByRole("tabpanel");
       await expect(panel).not.toBeEmpty();
     }
-
-    // "Your Spotify" is a standing personalization tab, not a per-query search source, reused
-    // from this same logged-in session rather than spending another login() call on it (the
-    // auth rate limit is shared across every test in this file, one backend process).
-    await page.getByRole("tab", { name: "Your Spotify" }).click();
-    await expect(page.getByRole("link", { name: "Connect Spotify" })).toBeVisible();
   });
 });
 
@@ -68,7 +68,7 @@ test.describe("Demo mode: request lifecycle", () => {
 
     await page.getByRole("link", { name: "Your requests" }).click();
     await expect(page).toHaveURL(/\/requests$/);
-    await expect(page.getByText("Pending review").first()).toBeVisible();
+    await expect(page.getByText("Waiting for approval").first()).toBeVisible();
   });
 
   test("admin approval queue lists pending requests and can approve one", async ({ page }) => {
@@ -106,9 +106,9 @@ test.describe("Demo mode: request history and fulfillment visibility", () => {
     // At least the statuses seeded for this exact user must be represented somewhere in
     // their history (some may have been mutated by earlier tests in this file, e.g. approving
     // the pending one, so we assert on the ones no other test in this suite touches).
-    await expect(page.getByText("Fulfilled").first()).toBeVisible();
-    await expect(page.getByText("Rejected").first()).toBeVisible();
-    await expect(page.getByText("Failed").first()).toBeVisible();
+    await expect(page.getByText("Downloaded").first()).toBeVisible();
+    await expect(page.getByText("Declined").first()).toBeVisible();
+    await expect(page.getByText("Download failed").first()).toBeVisible();
   });
 
   test("a fulfilled seeded request shows its filed path in the detail view", async ({ page }) => {
@@ -119,7 +119,7 @@ test.describe("Demo mode: request history and fulfillment visibility", () => {
     const emptyState = page.locator(".empty-state");
     await expect(anyRow.or(emptyState)).toBeVisible();
 
-    const fulfilledRow = page.locator(".request-row", { hasText: "Fulfilled" }).first();
+    const fulfilledRow = page.locator(".request-row", { hasText: "Downloaded" }).first();
     if ((await fulfilledRow.count()) === 0) {
       test.skip(true, "No fulfilled seed row visible for this user in this run");
       return;

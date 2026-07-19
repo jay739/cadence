@@ -3,12 +3,12 @@ import { Groove } from "./Groove";
 import "./StatusBadge.css";
 
 const LABELS: Record<RequestStatus, string> = {
-  pending: "Pending review",
-  approved: "Approved, queued",
+  pending: "Waiting for approval",
+  approved: "Approved, download queued",
   downloading: "Downloading",
-  fulfilled: "Fulfilled",
-  rejected: "Rejected",
-  failed: "Failed",
+  fulfilled: "Downloaded",
+  rejected: "Declined",
+  failed: "Download failed",
 };
 
 export function StatusBadge({ status }: { status: RequestStatus }) {

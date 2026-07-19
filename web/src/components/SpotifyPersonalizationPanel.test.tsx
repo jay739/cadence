@@ -12,6 +12,7 @@ vi.mock("../api/client", async () => {
     ...actual,
     api: {
       ...actual.api,
+      health: { get: vi.fn() },
       spotifyPersonalization: {
         status: vi.fn(),
         connectUrl: vi.fn(() => "/api/spotify/connect"),
@@ -25,6 +26,7 @@ vi.mock("../api/client", async () => {
 });
 
 const mockedApi = api as unknown as {
+  health: { get: ReturnType<typeof vi.fn> };
   spotifyPersonalization: {
     status: ReturnType<typeof vi.fn>;
     connectUrl: ReturnType<typeof vi.fn>;
@@ -34,6 +36,20 @@ const mockedApi = api as unknown as {
     playlistTracks: ReturnType<typeof vi.fn>;
   };
 };
+
+function healthWithSpotify(configured: boolean) {
+  return {
+    version: "0.1.0",
+    mode: "live" as const,
+    database_ok: true,
+    integrations: {
+      prowlarr: { configured: false, reachable: null },
+      qbittorrent: { configured: false, reachable: null },
+      slskd: { configured: false, reachable: null },
+      spotify: { configured, reachable: null },
+    },
+  };
+}
 
 function renderPanel() {
   const queryClient = new QueryClient({
@@ -66,6 +82,7 @@ const track: TrackResult = {
 describe("SpotifyPersonalizationPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedApi.health.get.mockResolvedValue(healthWithSpotify(true));
     mockedApi.spotifyPersonalization.playlists.mockResolvedValue({
       playlists: [],
     } satisfies SpotifyPlaylistsResponse);
@@ -82,6 +99,19 @@ describe("SpotifyPersonalizationPanel", () => {
     expect(await screen.findByText(/connect your spotify account/i)).toBeInTheDocument();
     const link = screen.getByRole("link", { name: /connect spotify/i });
     expect(link).toHaveAttribute("href", "/api/spotify/connect");
+  });
+
+  it("explains instead of offering a dead-end Connect button when the server has no Spotify app", async () => {
+    mockedApi.health.get.mockResolvedValue(healthWithSpotify(false));
+    mockedApi.spotifyPersonalization.status.mockResolvedValue({
+      connected: false,
+      display_name: null,
+    } satisfies SpotifyConnectionStatus);
+
+    renderPanel();
+
+    expect(await screen.findByText(/isn't set up on this server yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /connect spotify/i })).not.toBeInTheDocument();
   });
 
   it("shows saved tracks and the display name once connected", async () => {

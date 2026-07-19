@@ -255,3 +255,59 @@ class TestAdminApprovalQueue:
             headers=admin_headers,
         )
         assert resp.status_code == 404
+
+
+class TestPreferredFormat:
+    async def test_defaults_to_any_and_is_echoed(self, app_client):
+        headers = await register_and_login(
+            app_client, "fmtdefault@example.com", "a-strong-password-1"
+        )
+        resp = await app_client.post(
+            "/api/requests",
+            json={
+                "source": "apple",
+                "source_id": "fmt-1",
+                "title": "Some Song",
+                "artist": "Some Artist",
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["preferred_format"] == "any"
+
+    async def test_explicit_preference_round_trips(self, app_client):
+        headers = await register_and_login(
+            app_client, "fmtflac@example.com", "a-strong-password-1"
+        )
+        resp = await app_client.post(
+            "/api/requests",
+            json={
+                "source": "apple",
+                "source_id": "fmt-2",
+                "title": "Some Song",
+                "artist": "Some Artist",
+                "preferred_format": "flac",
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["preferred_format"] == "flac"
+        listing = await app_client.get("/api/requests/mine", headers=headers)
+        assert any(r["preferred_format"] == "flac" for r in listing.json())
+
+    async def test_junk_preference_is_rejected(self, app_client):
+        headers = await register_and_login(
+            app_client, "fmtjunk@example.com", "a-strong-password-1"
+        )
+        resp = await app_client.post(
+            "/api/requests",
+            json={
+                "source": "apple",
+                "source_id": "fmt-3",
+                "title": "Some Song",
+                "artist": "Some Artist",
+                "preferred_format": "wav9000",
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422

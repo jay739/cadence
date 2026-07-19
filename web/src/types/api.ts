@@ -19,6 +19,9 @@ export interface AuthResponse {
 
 export type SearchSourceName = "apple" | "musicbrainz" | "spotify" | "prowlarr";
 
+// Requester's audio-quality preference: reorders download candidates, never a hard filter.
+export type PreferredFormat = "any" | "mp3" | "flac";
+
 export interface TrackResult {
   source: SearchSourceName;
   source_id: string;
@@ -62,6 +65,7 @@ export interface RequestRecord {
   source: SearchSourceName;
   source_id: string;
   musicbrainz_recording_id: string | null;
+  preferred_format: PreferredFormat;
   status: RequestStatus;
   admin_note: string | null;
   failure_reason: string | null;

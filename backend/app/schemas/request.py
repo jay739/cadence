@@ -25,6 +25,7 @@ class CreateRequestIn(BaseModel):
     duration_seconds: int | None = Field(default=None, ge=0, le=36000)
     artwork_url: str | None = Field(default=None, max_length=2048)
     musicbrainz_recording_id: str | None = Field(default=None, max_length=64)
+    preferred_format: str = Field(default="any", max_length=8)
 
     @field_validator("source")
     @classmethod
@@ -32,6 +33,17 @@ class CreateRequestIn(BaseModel):
         allowed = {"apple", "musicbrainz", "spotify", "prowlarr"}
         if v not in allowed:
             raise ValueError(f"source must be one of {sorted(allowed)}")
+        return v
+
+    @field_validator("preferred_format")
+    @classmethod
+    def _valid_preferred_format(cls, v: str) -> str:
+        from app.services.scoring import PREFERRED_FORMATS
+
+        if v not in PREFERRED_FORMATS:
+            raise ValueError(
+                f"preferred_format must be one of {list(PREFERRED_FORMATS)}"
+            )
         return v
 
     @field_validator("title", "artist", "album")
@@ -78,6 +90,7 @@ class RequestOut(BaseModel):
     source: str
     source_id: str
     musicbrainz_recording_id: str | None
+    preferred_format: str
     status: RequestStatus
     admin_note: str | None
     failure_reason: str | None

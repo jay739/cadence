@@ -5,6 +5,7 @@ import type {
   IntegrationSettings,
   MultiSearchResponse,
   RequestDetail,
+  PreferredFormat,
   RequestRecord,
   SearchSourceName,
   SettingsIntegrationName,
@@ -114,6 +115,7 @@ export const api = {
       duration_seconds: number | null;
       artwork_url: string | null;
       musicbrainz_recording_id: string | null;
+      preferred_format: PreferredFormat;
     }) =>
       request<RequestRecord>("/api/requests", {
         method: "POST",

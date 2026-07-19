@@ -44,12 +44,21 @@ describe("TrackCard", () => {
     expect(screen.getByText("12 seeders")).toBeInTheDocument();
   });
 
-  it("calls onRequest with the track when the button is clicked", async () => {
+  it("calls onRequest with the track and the default Any quality when clicked", async () => {
     const onRequest = vi.fn();
     const user = userEvent.setup();
     render(<TrackCard track={baseTrack} onRequest={onRequest} requestState="idle" />);
     await user.click(screen.getByRole("button", { name: /request/i }));
-    expect(onRequest).toHaveBeenCalledWith(baseTrack);
+    expect(onRequest).toHaveBeenCalledWith(baseTrack, "any");
+  });
+
+  it("passes the chosen quality preference through to onRequest", async () => {
+    const onRequest = vi.fn();
+    const user = userEvent.setup();
+    render(<TrackCard track={baseTrack} onRequest={onRequest} requestState="idle" />);
+    await user.selectOptions(screen.getByRole("combobox", { name: /preferred quality/i }), "flac");
+    await user.click(screen.getByRole("button", { name: /request/i }));
+    expect(onRequest).toHaveBeenCalledWith(baseTrack, "flac");
   });
 
   it("disables the button and shows progress while requesting", () => {

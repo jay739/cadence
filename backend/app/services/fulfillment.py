@@ -46,6 +46,7 @@ from app.services.scoring import (
     best_qualifying_candidate,
     extract_extension,
     format_rank,
+    matches_preferred_format,
     title_artist_similarity,
 )
 from app.services.settings_store import apply_effective_settings
@@ -198,6 +199,9 @@ async def _try_prowlarr(
                 item.get("title", ""), request_row.title, request_row.artist
             ),
             format_score=format_rank(extract_extension(item.get("title", ""))),
+            matches_preference=matches_preferred_format(
+                item.get("title", ""), request_row.preferred_format
+            ),
             size_bytes=item.get("size"),
             extra={
                 "indexerId": item.get("indexerId"),
@@ -359,6 +363,9 @@ async def _try_slskd(
                 f.get("filename", ""), request_row.title, request_row.artist
             ),
             format_score=format_rank(extract_extension(f.get("filename", ""))),
+            matches_preference=matches_preferred_format(
+                f.get("filename", ""), request_row.preferred_format
+            ),
             size_bytes=f.get("size"),
             extra={"username": f.get("username"), "bitRate": f.get("bitRate")},
         )

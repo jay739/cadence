@@ -28,7 +28,7 @@ const INTEGRATIONS: IntegrationSpec[] = [
   {
     key: "prowlarr",
     title: "Prowlarr",
-    description: "Searches your configured indexers directly for the requested track.",
+    description: "Your indexer manager: finds the requested song on the indexers you already use.",
     fields: [
       { name: "prowlarr_url", label: "URL", placeholder: "http://prowlarr:9696" },
       { name: "prowlarr_api_key", label: "API key", type: "password" },
@@ -38,7 +38,7 @@ const INTEGRATIONS: IntegrationSpec[] = [
   {
     key: "qbittorrent",
     title: "qBittorrent",
-    description: "Polls the download client Prowlarr hands grabbed releases off to.",
+    description: "Your download client: grabs found releases and reports when they finish.",
     fields: [
       { name: "qbittorrent_url", label: "URL", placeholder: "http://qbittorrent:8080" },
       { name: "qbittorrent_username", label: "Username" },
@@ -49,7 +49,7 @@ const INTEGRATIONS: IntegrationSpec[] = [
   {
     key: "slskd",
     title: "slskd (Soulseek)",
-    description: "Fallback source used when Prowlarr yields nothing usable.",
+    description: "Soulseek, the backup source used when your indexers come up empty.",
     fields: [
       { name: "slskd_url", label: "URL", placeholder: "http://slskd:5030" },
       { name: "slskd_api_key", label: "API key", type: "password" },
@@ -59,7 +59,7 @@ const INTEGRATIONS: IntegrationSpec[] = [
   {
     key: "spotify",
     title: "Spotify",
-    description: "App-only Client Credentials search tab (no per-user login).",
+    description: "Powers the Spotify tab: catalog search plus the per-user account connection.",
     fields: [
       { name: "spotify_client_id", label: "Client ID" },
       { name: "spotify_client_secret", label: "Client secret", type: "password" },
@@ -69,7 +69,7 @@ const INTEGRATIONS: IntegrationSpec[] = [
   {
     key: "library",
     title: "Library",
-    description: "Where fulfilled tracks are filed, and the filename pattern used.",
+    description: "Where downloaded songs are saved, and how their filenames are laid out.",
     fields: [
       { name: "music_library_path", label: "Library path", placeholder: "/app/library" },
       {

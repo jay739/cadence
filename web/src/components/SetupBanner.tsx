@@ -42,8 +42,9 @@ export function SetupBanner() {
   return (
     <div className="setup-banner" role="status">
       <span>
-        No fulfillment sources are configured yet, so approved requests can be searched but never
-        downloaded. Add Prowlarr, qBittorrent, slskd, or Spotify credentials to get started.
+        No download sources are set up yet: people can search for songs, but nothing can be
+        downloaded until you add your indexer (Prowlarr), download client (qBittorrent), or Soulseek
+        (slskd) details.
       </span>
       <div className="setup-banner__actions">
         <Link to="/admin/settings" className="button button--primary">

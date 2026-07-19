@@ -12,7 +12,7 @@ export function Groove({ size = 20 }: { size?: number }) {
       className="groove"
       style={{ width: size, height: size }}
       role="img"
-      aria-label="Fulfillment in progress"
+      aria-label="Download in progress"
     >
       <span className="groove__ring" />
       <span className="groove__label" />

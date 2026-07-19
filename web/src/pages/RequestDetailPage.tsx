@@ -46,6 +46,10 @@ export function RequestDetailPage() {
           )}
           <dt>Source</dt>
           <dd className="mono">{data.source}</dd>
+          <dt>Preferred quality</dt>
+          <dd className="mono">
+            {data.preferred_format === "any" ? "Any" : data.preferred_format.toUpperCase()}
+          </dd>
           {data.final_file_path && (
             <>
               <dt>Filed at</dt>
@@ -67,10 +71,10 @@ export function RequestDetailPage() {
         </dl>
       </div>
 
-      <h2 className="request-detail__attempts-heading">Fulfillment attempts</h2>
+      <h2 className="request-detail__attempts-heading">Download attempts</h2>
       {data.attempts.length === 0 ? (
         <div className="empty-state">
-          No fulfillment attempts yet. This shows up once the request is approved.
+          No download attempts yet. This fills in once the request is approved.
         </div>
       ) : (
         <ol className="attempt-list">

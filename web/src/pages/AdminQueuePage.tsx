@@ -37,8 +37,8 @@ export function AdminQueuePage() {
       <div className="page-header">
         <h1>Approval queue</h1>
         <p>
-          Approve to enqueue fulfillment (Prowlarr first, Soulseek fallback), or reject with an
-          optional note the requester will see.
+          Approving starts the download (your indexers first, Soulseek as fallback). Declining can
+          include an optional note the requester will see.
         </p>
       </div>
 

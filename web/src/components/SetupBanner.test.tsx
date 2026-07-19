@@ -56,7 +56,7 @@ describe("SetupBanner", () => {
   it("shows when nothing is configured", async () => {
     mockedApi.health.get.mockResolvedValue(unconfiguredHealth());
     renderBanner();
-    expect(await screen.findByRole("status")).toHaveTextContent(/no fulfillment sources/i);
+    expect(await screen.findByRole("status")).toHaveTextContent(/no download sources/i);
   });
 
   it("stays hidden once at least one integration is configured", async () => {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
-import type { TrackResult } from "../types/api";
+import type { PreferredFormat, TrackResult } from "../types/api";
 import { TrackCard } from "./TrackCard";
 
 type RequestState = "idle" | "requesting" | "requested" | "error";
@@ -12,7 +12,7 @@ function trackKey(track: TrackResult): string {
 }
 
 interface SpotifyPersonalizationPanelProps {
-  onRequest: (track: TrackResult) => Promise<void>;
+  onRequest: (track: TrackResult, preferredFormat: PreferredFormat) => Promise<void>;
   requestStates: Record<string, RequestState>;
 }
 
@@ -26,6 +26,15 @@ export function SpotifyPersonalizationPanel({
   const statusQuery = useQuery({
     queryKey: ["spotify-personalization-status"],
     queryFn: () => api.spotifyPersonalization.status(),
+  });
+
+  // Same cache key the SetupBanner uses, so this costs no extra request in practice. Needed to
+  // tell "you haven't connected yet" apart from "this server has no Spotify app configured at
+  // all", where showing a Connect button would just dead-end in an error.
+  const healthQuery = useQuery({
+    queryKey: ["health"],
+    queryFn: () => api.health.get(),
+    staleTime: 60_000,
   });
 
   // Spotify's own callback redirects the whole browser back to "/" with this query param, since
@@ -73,9 +82,23 @@ export function SpotifyPersonalizationPanel({
   }
 
   if (!statusQuery.data?.connected) {
+    const spotifyConfigured = healthQuery.data?.integrations?.spotify?.configured ?? true;
+    if (!spotifyConfigured) {
+      return (
+        <div className="empty-state spotify-connect-prompt">
+          <p>
+            Spotify isn't set up on this server yet. An admin needs to add the Spotify app details
+            on the Settings page before anyone can connect an account or search Spotify.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="empty-state spotify-connect-prompt">
-        <p>Connect your Spotify account to quick-pick from your saved tracks and playlists.</p>
+        <p>
+          Connect your Spotify account to search Spotify and quick-pick from your saved tracks and
+          playlists.
+        </p>
         <a className="button button--primary" href={api.spotifyPersonalization.connectUrl()}>
           Connect Spotify
         </a>

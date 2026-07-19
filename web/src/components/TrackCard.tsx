@@ -1,4 +1,5 @@
-import type { TrackResult } from "../types/api";
+import { useState } from "react";
+import type { PreferredFormat, TrackResult } from "../types/api";
 import "./TrackCard.css";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -23,13 +24,16 @@ function formatSize(bytes: number | null): string | null {
 
 interface TrackCardProps {
   track: TrackResult;
-  onRequest: (track: TrackResult) => void;
+  onRequest: (track: TrackResult, preferredFormat: PreferredFormat) => void;
   requestState: "idle" | "requesting" | "requested" | "error";
 }
 
 export function TrackCard({ track, onRequest, requestState }: TrackCardProps) {
   const duration = formatDuration(track.duration_seconds);
   const size = formatSize(track.size_bytes);
+  // Quality is a preference, not a guarantee: it reorders download candidates server-side but
+  // never blocks the request when only another format exists.
+  const [preferredFormat, setPreferredFormat] = useState<PreferredFormat>("any");
 
   return (
     <li className="track-card">
@@ -55,17 +59,30 @@ export function TrackCard({ track, onRequest, requestState }: TrackCardProps) {
           {typeof track.seeders === "number" && <span>{track.seeders} seeders</span>}
         </div>
       </div>
-      <button
-        type="button"
-        className="button button--primary track-card__action"
-        disabled={requestState === "requesting" || requestState === "requested"}
-        onClick={() => onRequest(track)}
-      >
-        {requestState === "requesting" && "Requesting…"}
-        {requestState === "requested" && "Requested"}
-        {requestState === "error" && "Try again"}
-        {requestState === "idle" && "Request"}
-      </button>
+      <div className="track-card__actions">
+        <select
+          className="track-card__format"
+          aria-label="Preferred quality"
+          value={preferredFormat}
+          disabled={requestState === "requesting" || requestState === "requested"}
+          onChange={(e) => setPreferredFormat(e.target.value as PreferredFormat)}
+        >
+          <option value="any">Any quality</option>
+          <option value="mp3">MP3</option>
+          <option value="flac">FLAC</option>
+        </select>
+        <button
+          type="button"
+          className="button button--primary track-card__action"
+          disabled={requestState === "requesting" || requestState === "requested"}
+          onClick={() => onRequest(track, preferredFormat)}
+        >
+          {requestState === "requesting" && "Requesting…"}
+          {requestState === "requested" && "Requested"}
+          {requestState === "error" && "Try again"}
+          {requestState === "idle" && "Request"}
+        </button>
+      </div>
     </li>
   );
 }

@@ -88,6 +88,7 @@ async def create_or_get_existing_request(
         source=body.source,
         source_id=body.source_id,
         musicbrainz_recording_id=body.musicbrainz_recording_id,
+        preferred_format=body.preferred_format,
         dedupe_key=dedupe_key,
         status=RequestStatus.PENDING,
     )

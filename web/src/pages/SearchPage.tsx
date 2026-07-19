@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { SearchSourceName, TrackResult } from "../types/api";
+import type { PreferredFormat, SearchSourceName, TrackResult } from "../types/api";
 import { TrackCard } from "../components/TrackCard";
 import { SpotifyPersonalizationPanel } from "../components/SpotifyPersonalizationPanel";
 import { useSearchStream } from "../hooks/useSearchStream";
@@ -14,12 +14,8 @@ const SOURCE_TABS: { key: SearchSourceName; label: string }[] = [
   { key: "prowlarr", label: "Prowlarr" },
 ];
 
-// Not a search source: an always-available quick-pick browse of the signed-in user's own
-// Spotify library (opt-in, separate OAuth connection), additive to the four search tabs above.
-const YOUR_SPOTIFY_TAB = "your-spotify" as const;
-
 type RequestState = "idle" | "requesting" | "requested" | "error";
-type ActiveTab = SearchSourceName | typeof YOUR_SPOTIFY_TAB;
+type ActiveTab = SearchSourceName;
 
 function trackKey(track: TrackResult): string {
   return `${track.source}:${track.source_id}`;
@@ -29,7 +25,7 @@ interface SearchResultsPanelProps {
   query: string;
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
-  onRequest: (track: TrackResult) => Promise<void>;
+  onRequest: (track: TrackResult, preferredFormat: PreferredFormat) => Promise<void>;
   requestStates: Record<string, RequestState>;
 }
 
@@ -47,8 +43,18 @@ function SearchResultsPanel({
   requestStates,
 }: SearchResultsPanelProps) {
   const searchStream = useSearchStream(query);
-  const activeSource = activeTab === YOUR_SPOTIFY_TAB ? undefined : searchStream.sources[activeTab];
-  const activeSourcePending = activeTab !== YOUR_SPOTIFY_TAB && !activeSource && query.length > 0;
+  const activeSource = searchStream.sources[activeTab];
+  const activeSourcePending = !activeSource && query.length > 0;
+  const activeLabel = SOURCE_TABS.find((t) => t.key === activeTab)?.label;
+  // One Spotify tab: with a query it behaves like any other search tab; with no query (or when
+  // Spotify search isn't set up server-side) it shows the signed-in user's own connection —
+  // their saved tracks/playlists once connected, or the Connect prompt.
+  const spotifyNotSetUp =
+    activeTab === "spotify" &&
+    activeSource &&
+    !activeSource.ok &&
+    /not configured/i.test(activeSource.error ?? "");
+  const showSpotifyPersonal = activeTab === "spotify" && (!query || spotifyNotSetUp);
 
   return (
     <>
@@ -76,35 +82,28 @@ function SearchResultsPanel({
             </button>
           );
         })}
-        <button
-          role="tab"
-          aria-selected={activeTab === YOUR_SPOTIFY_TAB}
-          className={`search-tabs__tab ${activeTab === YOUR_SPOTIFY_TAB ? "search-tabs__tab--active" : ""}`}
-          onClick={() => setActiveTab(YOUR_SPOTIFY_TAB)}
-          type="button"
-        >
-          Your Spotify
-        </button>
       </div>
 
       <div className="card search-results" role="tabpanel">
-        {activeTab === YOUR_SPOTIFY_TAB ? (
+        {showSpotifyPersonal ? (
           <SpotifyPersonalizationPanel onRequest={onRequest} requestStates={requestStates} />
         ) : !query ? (
-          <div className="empty-state">Search for a track to see results here.</div>
+          <div className="empty-state">Start typing above to see results here.</div>
         ) : (
           <>
-            {searchStream.isError && <p className="form-error">Search failed. Try again.</p>}
+            {searchStream.isError && (
+              <p className="form-error">Search couldn't connect. Refresh the page and try again.</p>
+            )}
             {activeSourcePending && (
               <p>
-                Waiting on {SOURCE_TABS.find((t) => t.key === activeTab)?.label}
-                {searchStream.isLoading ? "…" : " (no response)"}
+                {searchStream.isLoading
+                  ? `Still searching ${activeLabel}…`
+                  : `${activeLabel} didn't respond.`}
               </p>
             )}
             {activeSource && !activeSource.ok && (
               <p className="form-error">
-                {SOURCE_TABS.find((t) => t.key === activeTab)?.label} is unavailable right now:{" "}
-                {activeSource.error}. Other sources are unaffected.
+                {activeLabel} couldn't be searched: {activeSource.error}. The other tabs still work.
               </p>
             )}
             {activeSource && activeSource.ok && activeSource.results.length === 0 && (
@@ -155,7 +154,7 @@ export function SearchPage() {
   }, []);
 
   const requestMutation = useMutation({
-    mutationFn: (track: TrackResult) =>
+    mutationFn: ({ track, preferredFormat }: { track: TrackResult; preferredFormat: PreferredFormat }) =>
       api.requests.create({
         source: track.source,
         source_id: track.source_id,
@@ -165,14 +164,15 @@ export function SearchPage() {
         duration_seconds: track.duration_seconds,
         artwork_url: track.artwork_url,
         musicbrainz_recording_id: track.musicbrainz_recording_id,
+        preferred_format: preferredFormat,
       }),
   });
 
-  async function handleRequest(track: TrackResult) {
+  async function handleRequest(track: TrackResult, preferredFormat: PreferredFormat) {
     const key = trackKey(track);
     setRequestStates((prev) => ({ ...prev, [key]: "requesting" }));
     try {
-      await requestMutation.mutateAsync(track);
+      await requestMutation.mutateAsync({ track, preferredFormat });
       setRequestStates((prev) => ({ ...prev, [key]: "requested" }));
       queryClient.invalidateQueries({ queryKey: ["my-requests"] });
     } catch {

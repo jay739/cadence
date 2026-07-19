@@ -5,6 +5,7 @@ from app.services.scoring import (
     best_qualifying_candidate,
     extract_extension,
     format_rank,
+    matches_preferred_format,
     rank_candidates,
     title_artist_similarity,
 )
@@ -104,3 +105,64 @@ class TestCandidateRankingAndQualification:
 
     def test_best_qualifying_candidate_empty_list(self):
         assert best_qualifying_candidate([]) is None
+
+
+class TestFormatPreference:
+    def test_any_matches_everything(self):
+        assert matches_preferred_format("Artist - Title.mp3", "any") is True
+        assert matches_preferred_format("whatever", "any") is True
+
+    def test_extension_match_wins_over_tokens(self):
+        assert matches_preferred_format("Artist - Title.flac", "flac") is True
+        assert matches_preferred_format("Artist - Title.mp3", "flac") is False
+        # A known extension is authoritative even when the name also carries other tokens.
+        assert matches_preferred_format("Artist - Title FLAC rip.mp3", "flac") is False
+
+    def test_extensionless_release_title_matches_by_token(self):
+        # Prowlarr release titles rarely have an extension but usually carry a format marker.
+        assert matches_preferred_format("Artist - Title (2020) [FLAC] [WEB]", "flac") is True
+        assert matches_preferred_format("Artist - Title (2020) 320 MP3", "flac") is False
+        assert matches_preferred_format("Artist - Title (2020) 320 MP3", "mp3") is True
+
+    def test_preference_reorders_but_never_disqualifies(self):
+        flac = ScoredCandidate(
+            identifier="flac",
+            raw_name="Artist - Title.flac",
+            similarity=0.6,
+            format_score=4,
+            size_bytes=100,
+            extra={},
+            matches_preference=True,
+        )
+        mp3 = ScoredCandidate(
+            identifier="mp3",
+            raw_name="Artist - Title.mp3",
+            similarity=0.9,
+            format_score=1,
+            size_bytes=100,
+            extra={},
+            matches_preference=False,
+        )
+        # The preferred format wins despite lower similarity: both already qualify.
+        assert best_qualifying_candidate([mp3, flac]).identifier == "flac"
+        # A lone non-matching candidate is still used rather than failing the request.
+        assert best_qualifying_candidate([mp3]).identifier == "mp3"
+
+    def test_any_preference_keeps_similarity_ordering(self):
+        a = ScoredCandidate(
+            identifier="a",
+            raw_name="Artist - Title.mp3",
+            similarity=0.9,
+            format_score=1,
+            size_bytes=100,
+            extra={},
+        )
+        b = ScoredCandidate(
+            identifier="b",
+            raw_name="Artist - Title.flac",
+            similarity=0.6,
+            format_score=4,
+            size_bytes=100,
+            extra={},
+        )
+        assert best_qualifying_candidate([b, a]).identifier == "a"

@@ -61,6 +61,13 @@ class Request(Base):
         String(64), nullable=True
     )
 
+    # The requester's audio-quality preference ("any" | "mp3" | "flac"). A reordering signal
+    # for candidate selection, never a hard filter; server_default keeps rows from before this
+    # column (and any writer that doesn't set it) on the neutral value.
+    preferred_format: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="any", server_default="any"
+    )
+
     status: Mapped[RequestStatus] = mapped_column(
         Enum(RequestStatus, native_enum=False, length=16),
         default=RequestStatus.PENDING,
