@@ -521,3 +521,25 @@ class TestCallbackFailureModes:
         assert resp.status_code == 302
         assert "spotify_connect=error" in resp.headers["location"]
         get_settings.cache_clear()
+
+
+class TestRateLimiting:
+    async def test_status_route_is_rate_limited_after_threshold(self, app_client):
+        headers = await register_and_login(
+            app_client, "listener14@example.com", "a-strong-pw-1"
+        )
+        statuses = []
+        for _ in range(35):
+            resp = await app_client.get("/api/spotify/status", headers=headers)
+            statuses.append(resp.status_code)
+        assert 429 in statuses
+
+    async def test_disconnect_route_is_rate_limited_after_threshold(self, app_client):
+        headers = await register_and_login(
+            app_client, "listener15@example.com", "a-strong-pw-1"
+        )
+        statuses = []
+        for _ in range(15):
+            resp = await app_client.post("/api/spotify/disconnect", headers=headers)
+            statuses.append(resp.status_code)
+        assert 429 in statuses

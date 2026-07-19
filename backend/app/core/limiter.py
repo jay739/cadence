@@ -17,3 +17,8 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[])
 AUTH_RATE_LIMIT = "10/minute"
 SEARCH_RATE_LIMIT = "30/minute"
 REQUEST_CREATE_RATE_LIMIT = "20/minute"
+# Spotify personalization: connect/disconnect are state-changing and infrequent in normal use
+# (same budget as auth); the library-browse routes each make a real outbound Spotify call
+# (and, in the worst case, a token refresh), so they get the same budget as /api/search.
+SPOTIFY_CONNECTION_RATE_LIMIT = "10/minute"
+SPOTIFY_LIBRARY_RATE_LIMIT = "30/minute"

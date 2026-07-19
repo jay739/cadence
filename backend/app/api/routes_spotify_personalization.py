@@ -11,12 +11,17 @@ uses; the signed `state` param additionally binds the callback to the user who s
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_app_settings, get_current_user, get_db
 from app.core.config import Settings
+from app.core.limiter import (
+    SPOTIFY_CONNECTION_RATE_LIMIT,
+    SPOTIFY_LIBRARY_RATE_LIMIT,
+    limiter,
+)
 from app.core.safe_http import SafeHttpClient
 from app.core.security import (
     OAuthStateError,
@@ -61,7 +66,9 @@ async def _resolved_settings(session: AsyncSession, settings: Settings) -> Setti
 
 
 @router.get("/status", response_model=SpotifyConnectionStatus)
+@limiter.limit(SPOTIFY_LIBRARY_RATE_LIMIT)
 async def spotify_status(
+    request: Request,
     user: User = Depends(get_current_user),
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
@@ -92,7 +99,9 @@ async def spotify_status(
 
 
 @router.get("/connect")
+@limiter.limit(SPOTIFY_CONNECTION_RATE_LIMIT)
 async def spotify_connect(
+    request: Request,
     user: User = Depends(get_current_user),
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
@@ -178,7 +187,9 @@ async def spotify_callback(
 
 
 @router.post("/disconnect", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit(SPOTIFY_CONNECTION_RATE_LIMIT)
 async def spotify_disconnect(
+    request: Request,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> None:
@@ -218,7 +229,9 @@ async def _access_token_or_404(
 
 
 @router.get("/library/saved-tracks", response_model=list[TrackResult])
+@limiter.limit(SPOTIFY_LIBRARY_RATE_LIMIT)
 async def spotify_saved_tracks(
+    request: Request,
     user: User = Depends(get_current_user),
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
@@ -228,7 +241,9 @@ async def spotify_saved_tracks(
 
 
 @router.get("/library/playlists", response_model=SpotifyPlaylistsResponse)
+@limiter.limit(SPOTIFY_LIBRARY_RATE_LIMIT)
 async def spotify_playlists(
+    request: Request,
     user: User = Depends(get_current_user),
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
@@ -239,7 +254,9 @@ async def spotify_playlists(
 
 
 @router.get("/library/playlists/{playlist_id}/tracks", response_model=list[TrackResult])
+@limiter.limit(SPOTIFY_LIBRARY_RATE_LIMIT)
 async def spotify_playlist_tracks(
+    request: Request,
     playlist_id: str = Path(..., pattern=_SPOTIFY_ID_PATTERN),
     user: User = Depends(get_current_user),
     settings: Settings = Depends(get_app_settings),
