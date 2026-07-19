@@ -19,7 +19,7 @@ import type {
 // never talks to any third-party source directly (Spotify/Prowlarr/etc. keys stay server-side,
 // per the mission's security requirements). VITE_API_BASE_URL exists only for local dev
 // against a backend running on a different port.
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export class ApiError extends Error {
   status: number;
@@ -98,6 +98,11 @@ export const api = {
       request<MultiSearchResponse>(
         `/api/search?${new URLSearchParams({ q, limit: String(limit) })}`,
       ),
+    // EventSource (used by useSearchStream) makes its own GET directly, bypassing the request()
+    // helper above, since EventSource cannot set an Authorization header; the browser attaches
+    // the session cookie automatically instead, same-origin.
+    streamUrl: (q: string, limit = 20) =>
+      `${API_BASE}/api/search/stream?${new URLSearchParams({ q, limit: String(limit) })}`,
   },
   requests: {
     create: (payload: {

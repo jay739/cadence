@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError } from "../api/client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api/client";
 import type { SearchSourceName, TrackResult } from "../types/api";
 import { TrackCard } from "../components/TrackCard";
 import { SpotifyPersonalizationPanel } from "../components/SpotifyPersonalizationPanel";
+import { useSearchStream } from "../hooks/useSearchStream";
 import "./SearchPage.css";
 
 const SOURCE_TABS: { key: SearchSourceName; label: string }[] = [
@@ -20,18 +21,120 @@ const YOUR_SPOTIFY_TAB = "your-spotify" as const;
 type RequestState = "idle" | "requesting" | "requested" | "error";
 type ActiveTab = SearchSourceName | typeof YOUR_SPOTIFY_TAB;
 
+function trackKey(track: TrackResult): string {
+  return `${track.source}:${track.source_id}`;
+}
+
+interface SearchResultsPanelProps {
+  query: string;
+  activeTab: ActiveTab;
+  setActiveTab: (tab: ActiveTab) => void;
+  onRequest: (track: TrackResult) => Promise<void>;
+  requestStates: Record<string, RequestState>;
+}
+
+/**
+ * Remounted (via a `key={query}` on the parent's usage below) every time a new search is
+ * submitted, so useSearchStream's per-query state starts fresh with no manual reset logic:
+ * see that hook's docstring for why this project's stricter react-hooks lint rules rule out
+ * every alternative short of a remount.
+ */
+function SearchResultsPanel({
+  query,
+  activeTab,
+  setActiveTab,
+  onRequest,
+  requestStates,
+}: SearchResultsPanelProps) {
+  const searchStream = useSearchStream(query);
+  const activeSource = activeTab === YOUR_SPOTIFY_TAB ? undefined : searchStream.sources[activeTab];
+  const activeSourcePending = activeTab !== YOUR_SPOTIFY_TAB && !activeSource && query.length > 0;
+
+  return (
+    <>
+      <div className="search-tabs" role="tablist" aria-label="Search sources">
+        {SOURCE_TABS.map((tab) => {
+          const source = searchStream.sources[tab.key];
+          const count = source?.results.length ?? 0;
+          const failed = source && !source.ok;
+          const pending = query.length > 0 && !source;
+          return (
+            <button
+              key={tab.key}
+              role="tab"
+              aria-selected={activeTab === tab.key}
+              className={`search-tabs__tab ${activeTab === tab.key ? "search-tabs__tab--active" : ""}`}
+              onClick={() => setActiveTab(tab.key)}
+              type="button"
+            >
+              {tab.label}
+              {query && (
+                <span className={`search-tabs__count ${failed ? "search-tabs__count--error" : ""}`}>
+                  {pending ? "…" : failed ? "—" : count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <button
+          role="tab"
+          aria-selected={activeTab === YOUR_SPOTIFY_TAB}
+          className={`search-tabs__tab ${activeTab === YOUR_SPOTIFY_TAB ? "search-tabs__tab--active" : ""}`}
+          onClick={() => setActiveTab(YOUR_SPOTIFY_TAB)}
+          type="button"
+        >
+          Your Spotify
+        </button>
+      </div>
+
+      <div className="card search-results" role="tabpanel">
+        {activeTab === YOUR_SPOTIFY_TAB ? (
+          <SpotifyPersonalizationPanel onRequest={onRequest} requestStates={requestStates} />
+        ) : !query ? (
+          <div className="empty-state">Search for a track to see results here.</div>
+        ) : (
+          <>
+            {searchStream.isError && <p className="form-error">Search failed. Try again.</p>}
+            {activeSourcePending && (
+              <p>
+                Waiting on {SOURCE_TABS.find((t) => t.key === activeTab)?.label}
+                {searchStream.isLoading ? "…" : " (no response)"}
+              </p>
+            )}
+            {activeSource && !activeSource.ok && (
+              <p className="form-error">
+                {SOURCE_TABS.find((t) => t.key === activeTab)?.label} is unavailable right now:{" "}
+                {activeSource.error}. Other sources are unaffected.
+              </p>
+            )}
+            {activeSource && activeSource.ok && activeSource.results.length === 0 && (
+              <div className="empty-state">No matches from this source.</div>
+            )}
+            {activeSource && activeSource.ok && activeSource.results.length > 0 && (
+              <ul className="track-list">
+                {activeSource.results.map((track) => (
+                  <TrackCard
+                    key={trackKey(track)}
+                    track={track}
+                    onRequest={onRequest}
+                    requestState={requestStates[trackKey(track)] ?? "idle"}
+                  />
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function SearchPage() {
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("apple");
   const [requestStates, setRequestStates] = useState<Record<string, RequestState>>({});
   const queryClient = useQueryClient();
-
-  const searchQuery = useQuery({
-    queryKey: ["search", submittedQuery],
-    queryFn: () => api.search.query(submittedQuery),
-    enabled: submittedQuery.length > 0,
-  });
 
   const requestMutation = useMutation({
     mutationFn: (track: TrackResult) =>
@@ -46,10 +149,6 @@ export function SearchPage() {
         musicbrainz_recording_id: track.musicbrainz_recording_id,
       }),
   });
-
-  function trackKey(track: TrackResult): string {
-    return `${track.source}:${track.source_id}`;
-  }
 
   async function handleRequest(track: TrackResult) {
     const key = trackKey(track);
@@ -67,11 +166,6 @@ export function SearchPage() {
     event.preventDefault();
     setSubmittedQuery(query.trim());
   }
-
-  const activeSource =
-    activeTab === YOUR_SPOTIFY_TAB
-      ? undefined
-      : searchQuery.data?.sources.find((s) => s.source === activeTab);
 
   return (
     <div>
@@ -96,79 +190,14 @@ export function SearchPage() {
         </button>
       </form>
 
-      <div className="search-tabs" role="tablist" aria-label="Search sources">
-        {SOURCE_TABS.map((tab) => {
-          const source = searchQuery.data?.sources.find((s) => s.source === tab.key);
-          const count = source?.results.length ?? 0;
-          const failed = source && !source.ok;
-          return (
-            <button
-              key={tab.key}
-              role="tab"
-              aria-selected={activeTab === tab.key}
-              className={`search-tabs__tab ${activeTab === tab.key ? "search-tabs__tab--active" : ""}`}
-              onClick={() => setActiveTab(tab.key)}
-              type="button"
-            >
-              {tab.label}
-              {submittedQuery && searchQuery.isSuccess && (
-                <span className={`search-tabs__count ${failed ? "search-tabs__count--error" : ""}`}>
-                  {failed ? "—" : count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-        <button
-          role="tab"
-          aria-selected={activeTab === YOUR_SPOTIFY_TAB}
-          className={`search-tabs__tab ${activeTab === YOUR_SPOTIFY_TAB ? "search-tabs__tab--active" : ""}`}
-          onClick={() => setActiveTab(YOUR_SPOTIFY_TAB)}
-          type="button"
-        >
-          Your Spotify
-        </button>
-      </div>
-
-      <div className="card search-results" role="tabpanel">
-        {activeTab === YOUR_SPOTIFY_TAB ? (
-          <SpotifyPersonalizationPanel onRequest={handleRequest} requestStates={requestStates} />
-        ) : !submittedQuery ? (
-          <div className="empty-state">Search for a track to see results here.</div>
-        ) : (
-          <>
-            {searchQuery.isLoading && <p>Searching every source…</p>}
-            {searchQuery.isError && (
-              <p className="form-error">
-                {searchQuery.error instanceof ApiError
-                  ? searchQuery.error.message
-                  : "Search failed. Try again."}
-              </p>
-            )}
-            {activeSource && !activeSource.ok && (
-              <p className="form-error">
-                {SOURCE_TABS.find((t) => t.key === activeTab)?.label} is unavailable right now:{" "}
-                {activeSource.error}. Other sources are unaffected.
-              </p>
-            )}
-            {activeSource && activeSource.ok && activeSource.results.length === 0 && (
-              <div className="empty-state">No matches from this source.</div>
-            )}
-            {activeSource && activeSource.ok && activeSource.results.length > 0 && (
-              <ul className="track-list">
-                {activeSource.results.map((track) => (
-                  <TrackCard
-                    key={trackKey(track)}
-                    track={track}
-                    onRequest={handleRequest}
-                    requestState={requestStates[trackKey(track)] ?? "idle"}
-                  />
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-      </div>
+      <SearchResultsPanel
+        key={submittedQuery}
+        query={submittedQuery}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onRequest={handleRequest}
+        requestStates={requestStates}
+      />
     </div>
   );
 }
