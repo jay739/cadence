@@ -25,7 +25,8 @@ from app.api.routes_settings import router as settings_router
 from app.core.config import get_settings
 from app.core.limiter import limiter
 from app.core.middleware import SecurityHeadersMiddleware
-from app.db.base import create_all, get_sessionmaker, init_engine
+from app.db.base import get_engine, get_sessionmaker, init_engine
+from app.db.migrations import run_migrations
 from app.demo.seed import seed_demo_data
 from app.services.settings_store import seed_db_from_env_on_boot
 from app.services.users import bootstrap_admin
@@ -47,7 +48,7 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     init_engine(settings.resolved_database_url)
-    await create_all()
+    await run_migrations(get_engine(), settings.resolved_database_url)
 
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:

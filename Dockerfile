@@ -19,6 +19,8 @@ ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY backend/pyproject.toml ./
 COPY backend/app ./app
+COPY backend/alembic ./alembic
+COPY backend/alembic.ini ./
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
     && /opt/venv/bin/pip install .
@@ -34,6 +36,8 @@ WORKDIR /app
 
 COPY --from=backend-builder /opt/venv /opt/venv
 COPY --from=backend-builder /backend/app /app/app
+COPY --from=backend-builder /backend/alembic /app/alembic
+COPY --from=backend-builder /backend/alembic.ini /app/alembic.ini
 COPY --from=web-builder /web/dist /app/static
 
 ENV PATH="/opt/venv/bin:${PATH}" \
