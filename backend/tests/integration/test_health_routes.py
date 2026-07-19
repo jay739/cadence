@@ -64,3 +64,9 @@ class TestSecurityHeaders:
     async def test_frame_options_deny(self, app_client):
         resp = await app_client.get("/api/health")
         assert resp.headers["X-Frame-Options"] == "DENY"
+
+
+class TestCacheControlHeaderWiredEndToEnd:
+    async def test_api_response_carries_no_store(self, app_client):
+        resp = await app_client.get("/api/health")
+        assert resp.headers["cache-control"] == "no-store"

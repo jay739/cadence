@@ -41,8 +41,10 @@ class Request(Base):
     __tablename__ = "requests"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # Indexed: filtered on every "my requests" list load and every dedupe check on request
+    # creation (SQLite does not automatically index foreign key columns).
     user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id"), nullable=False
+        String(36), ForeignKey("users.id"), nullable=False, index=True
     )
 
     # Track identity captured at request time, used verbatim to drive fulfillment search.
@@ -108,8 +110,10 @@ class FulfillmentAttempt(Base):
     __tablename__ = "fulfillment_attempts"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # Indexed: the request detail page's lazy-loaded `attempts` relationship filters on this
+    # (SQLite does not automatically index foreign key columns).
     request_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("requests.id"), nullable=False
+        String(36), ForeignKey("requests.id"), nullable=False, index=True
     )
 
     backend: Mapped[str] = mapped_column(

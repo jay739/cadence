@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -16,12 +17,35 @@ _engine = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+def _tune_sqlite_connection(dbapi_connection, _connection_record) -> None:
+    """Per-connection SQLite pragmas, applied via the pool's connect event.
+
+    - WAL journal: readers (search, request lists) no longer block behind the fulfillment
+      worker's writes, and a crash mid-write can't corrupt the main database file.
+    - synchronous=NORMAL: the safe pairing with WAL (fsync at checkpoint, not every commit),
+      substantially cheaper than FULL with no integrity loss for this workload.
+    - busy_timeout: a briefly-locked database waits instead of instantly raising
+      "database is locked" when the worker and a request commit at the same moment.
+    - foreign_keys=ON: SQLite ships with FK enforcement OFF per connection; without this the
+      requests.user_id / fulfillment_attempts.request_id constraints are decorative.
+    """
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 def init_engine(database_url: str, *, echo: bool = False):
     global _engine, _sessionmaker
     connect_args = {}
-    if database_url.startswith("sqlite"):
+    is_sqlite = database_url.startswith("sqlite")
+    if is_sqlite:
         connect_args["check_same_thread"] = False
     _engine = create_async_engine(database_url, echo=echo, connect_args=connect_args)
+    if is_sqlite:
+        event.listen(_engine.sync_engine, "connect", _tune_sqlite_connection)
     _sessionmaker = async_sessionmaker(
         _engine, expire_on_commit=False, class_=AsyncSession
     )

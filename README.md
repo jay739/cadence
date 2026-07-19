@@ -85,6 +85,16 @@ terminates TLS and forwards to `:8000`. It sends its own security headers (CSP,
 overrides or strips them. If you serve the API and web client from the same origin (the
 default, since one container serves both), no CORS configuration is needed.
 
+## Backing up the database
+
+The SQLite database runs in WAL mode (better concurrency between web requests and the
+background download worker). While the app is running, recent commits can live in
+`cadence.db-wal` alongside `cadence.db` before being checkpointed back into the main file, so
+**copying only `cadence.db` while the container is running can miss data**. Either stop the
+container first, or use `sqlite3 cadence.db "VACUUM INTO '/backup/path/cadence-backup.db'"`
+(safe to run against a live database; it checkpoints WAL into a fresh, complete file at the
+target path).
+
 ## Security posture
 
 - Passwords hashed with argon2; sessions are JWTs with real expiry and a token-version claim

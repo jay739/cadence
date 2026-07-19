@@ -9,6 +9,8 @@
 **/.ruff_cache
 **/data
 **/*.db
+**/*.db-wal
+**/*.db-shm
 **/*.sqlite*
 .git
 .github

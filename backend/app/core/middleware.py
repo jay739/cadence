@@ -26,6 +26,26 @@ CSP_POLICY = (
 )
 
 
+def _cache_control_for(path: str) -> str:
+    """Cache-Control value for a response, based on request path.
+
+    - `/api/*`: never cached. Every response here is either per-user (auth, requests) or must
+      reflect live server state on the next call (search, health, settings) with no client-side
+      staleness window.
+    - `/assets/*`: Vite's production build names every JS/CSS file `<name>-<contenthash>.<ext>`,
+      so a given URL's bytes never change; a 1-year immutable cache is safe and skips the
+      revalidation round trip entirely on every repeat visit.
+    - Everything else (`index.html`, favicons, PWA icons): these keep the SAME filename across
+      a redeploy but their content can change, so they're revalidated rather than cached
+      immutably; the browser still avoids a full re-download when nothing changed (a 304).
+    """
+    if path.startswith("/api/"):
+        return "no-store"
+    if path.startswith("/assets/"):
+        return "public, max-age=31536000, immutable"
+    return "no-cache"
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
@@ -36,4 +56,5 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = (
             "geolocation=(), microphone=(), camera=()"
         )
+        response.headers["Cache-Control"] = _cache_control_for(request.url.path)
         return response
