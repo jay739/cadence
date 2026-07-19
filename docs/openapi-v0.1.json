@@ -1,0 +1,2455 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Cadence",
+        "description": "Self-hostable single-track music request service.",
+        "version": "0.1.0"
+    },
+    "paths": {
+        "/api/health": {
+            "get": {
+                "tags": [
+                    "health"
+                ],
+                "summary": "Health",
+                "description": "Version, mode, DB status, and per-integration configured/reachable booleans.\n\nNever leaks URLs, keys, or filesystem paths, per the mission's explicit requirement.",
+                "operationId": "health_api_health_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HealthOut"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/register": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Register",
+                "operationId": "register_api_auth_register_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegisterIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TokenOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/login": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Login",
+                "operationId": "login_api_auth_login_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LoginIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TokenOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/logout": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Logout",
+                "operationId": "logout_api_auth_logout_post",
+                "responses": {
+                    "204": {
+                        "description": "Successful Response"
+                    }
+                }
+            }
+        },
+        "/api/auth/me": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Me",
+                "operationId": "me_api_auth_me_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserOut"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/search": {
+            "get": {
+                "tags": [
+                    "search"
+                ],
+                "summary": "Search Tracks",
+                "description": "Search all configured sources in parallel. Requires authentication (not public).",
+                "operationId": "search_tracks_api_search_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300,
+                            "title": "Q"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 50,
+                            "minimum": 1,
+                            "default": 20,
+                            "title": "Limit"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MultiSearchResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/search/stream": {
+            "get": {
+                "tags": [
+                    "search"
+                ],
+                "summary": "Search Tracks Stream",
+                "description": "Same four sources as GET /api/search, but as a Server-Sent Events stream: each source's\nresult is sent the moment that source finishes, instead of waiting for the slowest of the\nfour (MusicBrainz's 1 req/sec rate limit or a slow/misconfigured Prowlarr can otherwise make\nevery tab wait on the slowest one). The browser's EventSource API cannot set an\nAuthorization header, so this route is reachable via the session cookie set at login\n(get_current_user already falls back to it) rather than only the Bearer token the SPA\notherwise uses for every other request.",
+                "operationId": "search_tracks_stream_api_search_stream_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300,
+                            "title": "Q"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 50,
+                            "minimum": 1,
+                            "default": 20,
+                            "title": "Limit"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/requests": {
+            "post": {
+                "tags": [
+                    "requests"
+                ],
+                "summary": "Create Request",
+                "operationId": "create_request_api_requests_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreateRequestIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RequestOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/requests/mine": {
+            "get": {
+                "tags": [
+                    "requests"
+                ],
+                "summary": "My Requests",
+                "operationId": "my_requests_api_requests_mine_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "items": {
+                                        "$ref": "#/components/schemas/RequestOut"
+                                    },
+                                    "type": "array",
+                                    "title": "Response My Requests Api Requests Mine Get"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/requests/{request_id}": {
+            "get": {
+                "tags": [
+                    "requests"
+                ],
+                "summary": "Get Request Detail",
+                "operationId": "get_request_detail_api_requests__request_id__get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "request_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Request Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RequestDetailOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/requests/admin/pending": {
+            "get": {
+                "tags": [
+                    "requests"
+                ],
+                "summary": "Admin Pending Requests",
+                "operationId": "admin_pending_requests_api_requests_admin_pending_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "items": {
+                                        "$ref": "#/components/schemas/RequestOut"
+                                    },
+                                    "type": "array",
+                                    "title": "Response Admin Pending Requests Api Requests Admin Pending Get"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/requests/admin/all": {
+            "get": {
+                "tags": [
+                    "requests"
+                ],
+                "summary": "Admin All Requests",
+                "operationId": "admin_all_requests_api_requests_admin_all_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "items": {
+                                        "$ref": "#/components/schemas/RequestOut"
+                                    },
+                                    "type": "array",
+                                    "title": "Response Admin All Requests Api Requests Admin All Get"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/requests/{request_id}/approve": {
+            "post": {
+                "tags": [
+                    "requests"
+                ],
+                "summary": "Admin Approve Request",
+                "operationId": "admin_approve_request_api_requests__request_id__approve_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "request_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Request Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApproveRequestIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RequestOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/requests/{request_id}/reject": {
+            "post": {
+                "tags": [
+                    "requests"
+                ],
+                "summary": "Admin Reject Request",
+                "operationId": "admin_reject_request_api_requests__request_id__reject_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "request_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Request Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RejectRequestIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RequestOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/settings": {
+            "get": {
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Get Settings View",
+                "operationId": "get_settings_view_api_admin_settings_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IntegrationSettingsOut"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/settings/prowlarr": {
+            "put": {
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Update Prowlarr Settings",
+                "operationId": "update_prowlarr_settings_api_admin_settings_prowlarr_put",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProwlarrSettingsIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IntegrationSettingsOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/settings/qbittorrent": {
+            "put": {
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Update Qbittorrent Settings",
+                "operationId": "update_qbittorrent_settings_api_admin_settings_qbittorrent_put",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/QBittorrentSettingsIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IntegrationSettingsOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/settings/slskd": {
+            "put": {
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Update Slskd Settings",
+                "operationId": "update_slskd_settings_api_admin_settings_slskd_put",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SlskdSettingsIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IntegrationSettingsOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/settings/spotify": {
+            "put": {
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Update Spotify Settings",
+                "operationId": "update_spotify_settings_api_admin_settings_spotify_put",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SpotifySettingsIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IntegrationSettingsOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/settings/library": {
+            "put": {
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Update Library Settings",
+                "operationId": "update_library_settings_api_admin_settings_library_put",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LibrarySettingsIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IntegrationSettingsOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/settings/{integration}/test": {
+            "post": {
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Test Connection",
+                "description": "Test a connection using the admin-supplied values directly (not necessarily saved yet).\n\nAccepts a raw JSON body keyed by field name (e.g. {\"prowlarr_url\": \"...\",\n\"prowlarr_api_key\": \"...\"}) so an admin can validate credentials before saving them. Makes\nexactly one outbound call via the SSRF-hardened SafeHttpClient per the mission's carried-\nover constraint; never persists anything regardless of outcome.",
+                "operationId": "test_connection_api_admin_settings__integration__test_post",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "integration",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Integration"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "null"
+                                        }
+                                    ]
+                                },
+                                "title": "Body"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TestConnectionOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spotify/status": {
+            "get": {
+                "tags": [
+                    "spotify-personalization"
+                ],
+                "summary": "Spotify Status",
+                "operationId": "spotify_status_api_spotify_status_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SpotifyConnectionStatus"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/spotify/connect": {
+            "get": {
+                "tags": [
+                    "spotify-personalization"
+                ],
+                "summary": "Spotify Connect",
+                "operationId": "spotify_connect_api_spotify_connect_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/spotify/callback": {
+            "get": {
+                "tags": [
+                    "spotify-personalization"
+                ],
+                "summary": "Spotify Callback",
+                "operationId": "spotify_callback_api_spotify_callback_get",
+                "parameters": [
+                    {
+                        "name": "code",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Code"
+                        }
+                    },
+                    {
+                        "name": "state",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "State"
+                        }
+                    },
+                    {
+                        "name": "error",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Error"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spotify/disconnect": {
+            "post": {
+                "tags": [
+                    "spotify-personalization"
+                ],
+                "summary": "Spotify Disconnect",
+                "operationId": "spotify_disconnect_api_spotify_disconnect_post",
+                "responses": {
+                    "204": {
+                        "description": "Successful Response"
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/spotify/library/saved-tracks": {
+            "get": {
+                "tags": [
+                    "spotify-personalization"
+                ],
+                "summary": "Spotify Saved Tracks",
+                "operationId": "spotify_saved_tracks_api_spotify_library_saved_tracks_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "items": {
+                                        "$ref": "#/components/schemas/TrackResult"
+                                    },
+                                    "type": "array",
+                                    "title": "Response Spotify Saved Tracks Api Spotify Library Saved Tracks Get"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/spotify/library/playlists": {
+            "get": {
+                "tags": [
+                    "spotify-personalization"
+                ],
+                "summary": "Spotify Playlists",
+                "operationId": "spotify_playlists_api_spotify_library_playlists_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SpotifyPlaylistsResponse"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ]
+            }
+        },
+        "/api/spotify/library/playlists/{playlist_id}/tracks": {
+            "get": {
+                "tags": [
+                    "spotify-personalization"
+                ],
+                "summary": "Spotify Playlist Tracks",
+                "operationId": "spotify_playlist_tracks_api_spotify_library_playlists__playlist_id__tracks_get",
+                "security": [
+                    {
+                        "HTTPBearer": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "playlist_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9]{1,64}$",
+                            "title": "Playlist Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/TrackResult"
+                                    },
+                                    "title": "Response Spotify Playlist Tracks Api Spotify Library Playlists  Playlist Id  Tracks Get"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "ApproveRequestIn": {
+                "properties": {
+                    "note": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 2000
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Note"
+                    }
+                },
+                "type": "object",
+                "title": "ApproveRequestIn"
+            },
+            "CreateRequestIn": {
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "maxLength": 32,
+                        "minLength": 1,
+                        "title": "Source"
+                    },
+                    "source_id": {
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1,
+                        "title": "Source Id"
+                    },
+                    "title": {
+                        "type": "string",
+                        "maxLength": 500,
+                        "minLength": 1,
+                        "title": "Title"
+                    },
+                    "artist": {
+                        "type": "string",
+                        "maxLength": 500,
+                        "minLength": 1,
+                        "title": "Artist"
+                    },
+                    "album": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 500
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Album"
+                    },
+                    "duration_seconds": {
+                        "anyOf": [
+                            {
+                                "type": "integer",
+                                "maximum": 36000.0,
+                                "minimum": 0.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Duration Seconds"
+                    },
+                    "artwork_url": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 2048
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Artwork Url"
+                    },
+                    "musicbrainz_recording_id": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 64
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Musicbrainz Recording Id"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "source",
+                    "source_id",
+                    "title",
+                    "artist"
+                ],
+                "title": "CreateRequestIn"
+            },
+            "FieldValue": {
+                "properties": {
+                    "value": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Value"
+                    },
+                    "source": {
+                        "type": "string",
+                        "title": "Source",
+                        "description": "\"env\" | \"db\" | \"unset\""
+                    },
+                    "is_secret": {
+                        "type": "boolean",
+                        "title": "Is Secret"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "value",
+                    "source",
+                    "is_secret"
+                ],
+                "title": "FieldValue",
+                "description": "One field's current effective value plus where it came from.\n\n`value` is masked for secret fields (see app.core.crypto.mask_secret); never the real\nplaintext once a secret has been saved. `source` is \"env\" (an environment variable is set\nand wins per the precedence rule), \"db\" (no env var, a database-stored value is in effect),\nor \"unset\" (neither)."
+            },
+            "FulfillmentAttemptOut": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "backend": {
+                        "type": "string",
+                        "title": "Backend"
+                    },
+                    "query_used": {
+                        "type": "string",
+                        "title": "Query Used"
+                    },
+                    "candidates_considered": {
+                        "anyOf": [
+                            {
+                                "items": {},
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Candidates Considered"
+                    },
+                    "chosen_candidate": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Chosen Candidate"
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "title": "Outcome"
+                    },
+                    "detail": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Detail"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "title": "Created At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "backend",
+                    "query_used",
+                    "candidates_considered",
+                    "chosen_candidate",
+                    "outcome",
+                    "detail",
+                    "created_at"
+                ],
+                "title": "FulfillmentAttemptOut"
+            },
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "HealthOut": {
+                "properties": {
+                    "version": {
+                        "type": "string",
+                        "title": "Version"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "title": "Mode"
+                    },
+                    "database_ok": {
+                        "type": "boolean",
+                        "title": "Database Ok"
+                    },
+                    "integrations": {
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/IntegrationStatus"
+                        },
+                        "type": "object",
+                        "title": "Integrations"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "version",
+                    "mode",
+                    "database_ok",
+                    "integrations"
+                ],
+                "title": "HealthOut"
+            },
+            "IntegrationSettingsOut": {
+                "properties": {
+                    "prowlarr": {
+                        "$ref": "#/components/schemas/ProwlarrSettingsOut"
+                    },
+                    "qbittorrent": {
+                        "$ref": "#/components/schemas/QBittorrentSettingsOut"
+                    },
+                    "slskd": {
+                        "$ref": "#/components/schemas/SlskdSettingsOut"
+                    },
+                    "spotify": {
+                        "$ref": "#/components/schemas/SpotifySettingsOut"
+                    },
+                    "library": {
+                        "$ref": "#/components/schemas/LibrarySettingsOut"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "prowlarr",
+                    "qbittorrent",
+                    "slskd",
+                    "spotify",
+                    "library"
+                ],
+                "title": "IntegrationSettingsOut"
+            },
+            "IntegrationStatus": {
+                "properties": {
+                    "configured": {
+                        "type": "boolean",
+                        "title": "Configured"
+                    },
+                    "reachable": {
+                        "anyOf": [
+                            {
+                                "type": "boolean"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Reachable"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "configured"
+                ],
+                "title": "IntegrationStatus"
+            },
+            "LibrarySettingsIn": {
+                "properties": {
+                    "music_library_path": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 2048
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Music Library Path"
+                    },
+                    "library_path_pattern": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 255
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Library Path Pattern"
+                    }
+                },
+                "type": "object",
+                "title": "LibrarySettingsIn"
+            },
+            "LibrarySettingsOut": {
+                "properties": {
+                    "music_library_path": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    },
+                    "library_path_pattern": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "music_library_path",
+                    "library_path_pattern"
+                ],
+                "title": "LibrarySettingsOut"
+            },
+            "LoginIn": {
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "title": "Email"
+                    },
+                    "password": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "title": "Password"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "email",
+                    "password"
+                ],
+                "title": "LoginIn"
+            },
+            "MultiSearchResponse": {
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "title": "Query"
+                    },
+                    "sources": {
+                        "items": {
+                            "$ref": "#/components/schemas/SourceSearchResult"
+                        },
+                        "type": "array",
+                        "title": "Sources"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "query",
+                    "sources"
+                ],
+                "title": "MultiSearchResponse"
+            },
+            "ProwlarrSettingsIn": {
+                "properties": {
+                    "prowlarr_url": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 2048
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Prowlarr Url"
+                    },
+                    "prowlarr_api_key": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 512
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Prowlarr Api Key"
+                    }
+                },
+                "type": "object",
+                "title": "ProwlarrSettingsIn"
+            },
+            "ProwlarrSettingsOut": {
+                "properties": {
+                    "prowlarr_url": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    },
+                    "prowlarr_api_key": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "prowlarr_url",
+                    "prowlarr_api_key"
+                ],
+                "title": "ProwlarrSettingsOut"
+            },
+            "QBittorrentSettingsIn": {
+                "properties": {
+                    "qbittorrent_url": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 2048
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Qbittorrent Url"
+                    },
+                    "qbittorrent_username": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 255
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Qbittorrent Username"
+                    },
+                    "qbittorrent_password": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 512
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Qbittorrent Password"
+                    }
+                },
+                "type": "object",
+                "title": "QBittorrentSettingsIn"
+            },
+            "QBittorrentSettingsOut": {
+                "properties": {
+                    "qbittorrent_url": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    },
+                    "qbittorrent_username": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    },
+                    "qbittorrent_password": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "qbittorrent_url",
+                    "qbittorrent_username",
+                    "qbittorrent_password"
+                ],
+                "title": "QBittorrentSettingsOut"
+            },
+            "RegisterIn": {
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "title": "Email"
+                    },
+                    "password": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "minLength": 10,
+                        "title": "Password"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "email",
+                    "password"
+                ],
+                "title": "RegisterIn"
+            },
+            "RejectRequestIn": {
+                "properties": {
+                    "note": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 2000
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Note"
+                    }
+                },
+                "type": "object",
+                "title": "RejectRequestIn"
+            },
+            "RequestDetailOut": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "title": "User Id"
+                    },
+                    "title": {
+                        "type": "string",
+                        "title": "Title"
+                    },
+                    "artist": {
+                        "type": "string",
+                        "title": "Artist"
+                    },
+                    "album": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Album"
+                    },
+                    "duration_seconds": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Duration Seconds"
+                    },
+                    "artwork_url": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Artwork Url"
+                    },
+                    "source": {
+                        "type": "string",
+                        "title": "Source"
+                    },
+                    "source_id": {
+                        "type": "string",
+                        "title": "Source Id"
+                    },
+                    "musicbrainz_recording_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Musicbrainz Recording Id"
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/RequestStatus"
+                    },
+                    "admin_note": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Admin Note"
+                    },
+                    "failure_reason": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Failure Reason"
+                    },
+                    "final_file_path": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Final File Path"
+                    },
+                    "fulfillment_attempts_count": {
+                        "type": "integer",
+                        "title": "Fulfillment Attempts Count"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "title": "Created At"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "title": "Updated At"
+                    },
+                    "attempts": {
+                        "items": {
+                            "$ref": "#/components/schemas/FulfillmentAttemptOut"
+                        },
+                        "type": "array",
+                        "title": "Attempts"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "user_id",
+                    "title",
+                    "artist",
+                    "album",
+                    "duration_seconds",
+                    "artwork_url",
+                    "source",
+                    "source_id",
+                    "musicbrainz_recording_id",
+                    "status",
+                    "admin_note",
+                    "failure_reason",
+                    "final_file_path",
+                    "fulfillment_attempts_count",
+                    "created_at",
+                    "updated_at"
+                ],
+                "title": "RequestDetailOut"
+            },
+            "RequestOut": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "title": "User Id"
+                    },
+                    "title": {
+                        "type": "string",
+                        "title": "Title"
+                    },
+                    "artist": {
+                        "type": "string",
+                        "title": "Artist"
+                    },
+                    "album": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Album"
+                    },
+                    "duration_seconds": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Duration Seconds"
+                    },
+                    "artwork_url": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Artwork Url"
+                    },
+                    "source": {
+                        "type": "string",
+                        "title": "Source"
+                    },
+                    "source_id": {
+                        "type": "string",
+                        "title": "Source Id"
+                    },
+                    "musicbrainz_recording_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Musicbrainz Recording Id"
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/RequestStatus"
+                    },
+                    "admin_note": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Admin Note"
+                    },
+                    "failure_reason": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Failure Reason"
+                    },
+                    "final_file_path": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Final File Path"
+                    },
+                    "fulfillment_attempts_count": {
+                        "type": "integer",
+                        "title": "Fulfillment Attempts Count"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "title": "Created At"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "title": "Updated At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "user_id",
+                    "title",
+                    "artist",
+                    "album",
+                    "duration_seconds",
+                    "artwork_url",
+                    "source",
+                    "source_id",
+                    "musicbrainz_recording_id",
+                    "status",
+                    "admin_note",
+                    "failure_reason",
+                    "final_file_path",
+                    "fulfillment_attempts_count",
+                    "created_at",
+                    "updated_at"
+                ],
+                "title": "RequestOut"
+            },
+            "RequestStatus": {
+                "type": "string",
+                "enum": [
+                    "pending",
+                    "approved",
+                    "downloading",
+                    "fulfilled",
+                    "rejected",
+                    "failed"
+                ],
+                "title": "RequestStatus"
+            },
+            "SlskdSettingsIn": {
+                "properties": {
+                    "slskd_url": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 2048
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Slskd Url"
+                    },
+                    "slskd_api_key": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 512
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Slskd Api Key"
+                    }
+                },
+                "type": "object",
+                "title": "SlskdSettingsIn"
+            },
+            "SlskdSettingsOut": {
+                "properties": {
+                    "slskd_url": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    },
+                    "slskd_api_key": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "slskd_url",
+                    "slskd_api_key"
+                ],
+                "title": "SlskdSettingsOut"
+            },
+            "SourceSearchResult": {
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "title": "Source"
+                    },
+                    "ok": {
+                        "type": "boolean",
+                        "title": "Ok"
+                    },
+                    "error": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Error"
+                    },
+                    "results": {
+                        "items": {
+                            "$ref": "#/components/schemas/TrackResult"
+                        },
+                        "type": "array",
+                        "title": "Results"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "source",
+                    "ok"
+                ],
+                "title": "SourceSearchResult",
+                "description": "Wraps one source's outcome so a failure never has to be inferred from an empty list."
+            },
+            "SpotifyConnectionStatus": {
+                "properties": {
+                    "connected": {
+                        "type": "boolean",
+                        "title": "Connected"
+                    },
+                    "display_name": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Display Name"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "connected"
+                ],
+                "title": "SpotifyConnectionStatus"
+            },
+            "SpotifyPlaylistSummary": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "name": {
+                        "type": "string",
+                        "title": "Name"
+                    },
+                    "track_count": {
+                        "type": "integer",
+                        "title": "Track Count"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "name",
+                    "track_count"
+                ],
+                "title": "SpotifyPlaylistSummary"
+            },
+            "SpotifyPlaylistsResponse": {
+                "properties": {
+                    "playlists": {
+                        "items": {
+                            "$ref": "#/components/schemas/SpotifyPlaylistSummary"
+                        },
+                        "type": "array",
+                        "title": "Playlists"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "playlists"
+                ],
+                "title": "SpotifyPlaylistsResponse"
+            },
+            "SpotifySettingsIn": {
+                "properties": {
+                    "spotify_client_id": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 255
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Spotify Client Id"
+                    },
+                    "spotify_client_secret": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 512
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Spotify Client Secret"
+                    }
+                },
+                "type": "object",
+                "title": "SpotifySettingsIn"
+            },
+            "SpotifySettingsOut": {
+                "properties": {
+                    "spotify_client_id": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    },
+                    "spotify_client_secret": {
+                        "$ref": "#/components/schemas/FieldValue"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "spotify_client_id",
+                    "spotify_client_secret"
+                ],
+                "title": "SpotifySettingsOut"
+            },
+            "TestConnectionOut": {
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "title": "Ok"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "ok",
+                    "detail"
+                ],
+                "title": "TestConnectionOut"
+            },
+            "TokenOut": {
+                "properties": {
+                    "access_token": {
+                        "type": "string",
+                        "title": "Access Token"
+                    },
+                    "token_type": {
+                        "type": "string",
+                        "title": "Token Type",
+                        "default": "bearer"
+                    },
+                    "user": {
+                        "$ref": "#/components/schemas/UserOut"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "access_token",
+                    "user"
+                ],
+                "title": "TokenOut"
+            },
+            "TrackResult": {
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "title": "Source",
+                        "description": "apple | musicbrainz | spotify | prowlarr"
+                    },
+                    "source_id": {
+                        "type": "string",
+                        "title": "Source Id"
+                    },
+                    "title": {
+                        "type": "string",
+                        "title": "Title"
+                    },
+                    "artist": {
+                        "type": "string",
+                        "title": "Artist"
+                    },
+                    "album": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Album"
+                    },
+                    "duration_seconds": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Duration Seconds"
+                    },
+                    "artwork_url": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Artwork Url"
+                    },
+                    "year": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Year"
+                    },
+                    "musicbrainz_recording_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Musicbrainz Recording Id"
+                    },
+                    "indexer": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Indexer"
+                    },
+                    "size_bytes": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Size Bytes"
+                    },
+                    "seeders": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Seeders"
+                    },
+                    "download_url": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Download Url"
+                    },
+                    "guid": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Guid"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "source",
+                    "source_id",
+                    "title",
+                    "artist"
+                ],
+                "title": "TrackResult",
+                "description": "One normalized search hit, regardless of which upstream source produced it."
+            },
+            "UserOut": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "email": {
+                        "type": "string",
+                        "title": "Email"
+                    },
+                    "role": {
+                        "$ref": "#/components/schemas/UserRole"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "title": "Created At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "email",
+                    "role",
+                    "created_at"
+                ],
+                "title": "UserOut"
+            },
+            "UserRole": {
+                "type": "string",
+                "enum": [
+                    "user",
+                    "admin"
+                ],
+                "title": "UserRole"
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    },
+                    "input": {
+                        "title": "Input"
+                    },
+                    "ctx": {
+                        "type": "object",
+                        "title": "Context"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        },
+        "securitySchemes": {
+            "HTTPBearer": {
+                "type": "http",
+                "scheme": "bearer"
+            }
+        }
+    }
+}
