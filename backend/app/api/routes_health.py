@@ -50,9 +50,17 @@ async def health(
         "qbittorrent": IntegrationStatus(configured=settings.qbittorrent_configured),
         "slskd": IntegrationStatus(configured=settings.slskd_configured),
         "spotify": IntegrationStatus(configured=settings.spotify_configured),
+        # Read pre-login, by the login page, to decide whether a "sign in with Navidrome"
+        # option is even offered. Just a boolean: no host or credential detail, same as
+        # every other entry here.
+        "navidrome": IntegrationStatus(configured=bool(settings.navidrome_url)),
     }
 
     if not settings.demo_mode:
+        if settings.navidrome_url:
+            integrations["navidrome"].reachable = await _reachable(
+                f"{settings.navidrome_url.rstrip('/')}/rest/ping.view"
+            )
         if settings.prowlarr_configured and settings.prowlarr_url:
             integrations["prowlarr"].reachable = await _reachable(
                 f"{settings.prowlarr_url.rstrip('/')}/api/v1/system/status",
