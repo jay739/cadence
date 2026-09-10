@@ -17,31 +17,31 @@
     "e2e:server": "bash e2e/run-server.sh"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.101.2",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "@tanstack/react-query": "^5.102.8",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.2",
-    "@testing-library/user-event": "^14.6.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^24.13.2",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
     "@vitest/ui": "^4.1.10",
-    "eslint": "^10.7.0",
+    "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.3",
-    "globals": "^17.7.0",
+    "eslint-plugin-react-refresh": "^0.5.6",
+    "globals": "^17.12.0",
     "jsdom": "^29.1.1",
-    "prettier": "^3.9.5",
+    "prettier": "^3.9.6",
     "typescript": "~6.0.2",
-    "typescript-eslint": "^8.64.0",
-    "vite": "^8.1.1",
+    "typescript-eslint": "^8.69.0",
+    "vite": "^8.2.2",
     "vitest": "^4.1.10"
   }
 }
