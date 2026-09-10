@@ -166,3 +166,51 @@ class TestFormatPreference:
             extra={},
         )
         assert best_qualifying_candidate([b, a]).identifier == "a"
+
+
+def _cand(identifier: str, *, similarity: float, seeders: int | None, name: str = "x"):
+    return ScoredCandidate(
+        identifier=identifier,
+        raw_name=name,
+        similarity=similarity,
+        format_score=1,
+        size_bytes=100,
+        extra={},
+        seeders=seeders,
+    )
+
+
+class TestSeederAwareness:
+    def test_zero_seeder_torrent_never_qualifies(self):
+        # Not merely a worse pick: it can never finish, and grabbing it burns the budget.
+        assert not _cand("dead", similarity=1.0, seeders=0).qualifies
+
+    def test_soulseek_candidate_without_seeders_still_qualifies(self):
+        # None means the swarm concept does not apply, and must not read as zero.
+        assert _cand("slsk", similarity=0.9, seeders=None).qualifies
+
+    def test_healthy_swarm_wins_inside_the_same_similarity_band(self):
+        # The real regression: a 1.00/1-seeder release beat a 0.93/50-seeder one and stalled
+        # in metaDL at 0%. Banding similarity lets swarm health settle near-ties.
+        weak = _cand("weak", similarity=0.97, seeders=1)
+        strong = _cand("strong", similarity=0.93, seeders=50)
+        assert rank_candidates([weak, strong])[0].identifier == "strong"
+
+    def test_similarity_still_outranks_seeders_across_bands(self):
+        # A wildly-seeded wrong song must not beat the clearly-correct one.
+        right = _cand("right", similarity=0.95, seeders=2)
+        wrong = _cand("wrong", similarity=0.55, seeders=900)
+        assert rank_candidates([right, wrong])[0].identifier == "right"
+
+
+class TestEntityUnescaping:
+    def test_double_escaped_ampersand_does_not_pollute_similarity(self):
+        # Prowlarr hands back HTML-escaped titles, some of them double-escaped. Without
+        # unescaping, the stripper leaves literal "amp" tokens behind.
+        escaped = title_artist_similarity(
+            "Daft Punk &amp;amp; Pharrell - Get Lucky", "Get Lucky", "Daft Punk & Pharrell"
+        )
+        plain = title_artist_similarity(
+            "Daft Punk & Pharrell - Get Lucky", "Get Lucky", "Daft Punk & Pharrell"
+        )
+        assert escaped == plain

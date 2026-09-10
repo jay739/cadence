@@ -218,6 +218,7 @@ async def _try_prowlarr(
                 item.get("title", ""), request_row.preferred_format
             ),
             size_bytes=item.get("size"),
+            seeders=item.get("seeders"),
             extra={
                 "indexerId": item.get("indexerId"),
                 "indexer": item.get("indexer"),
