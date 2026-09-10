@@ -130,9 +130,14 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     renderLoginPage();
 
+    // The create-account link renders on the very first paint (local mode is the default,
+    // unconditional on the health check), so it resolves as soon as this awaits at all and
+    // proves nothing about whether the health check has settled yet. Wait for the tab itself,
+    // which only appears once navidromeAvailable flips true, before clicking it, or this races
+    // against LoginPage's own effect and fails intermittently depending on microtask timing.
     expect(await screen.findByRole("link", { name: /create an account/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: /sign in with navidrome/i }));
+    await user.click(await screen.findByRole("tab", { name: /sign in with navidrome/i }));
     expect(screen.queryByRole("link", { name: /create an account/i })).not.toBeInTheDocument();
   });
 });
