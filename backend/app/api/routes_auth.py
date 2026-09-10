@@ -84,8 +84,12 @@ async def login(
     )
     if user is None:
         logger.info("login_failed")
+        # Never say "email": identifier is a Navidrome username as often as it is a local
+        # account's email, and a wrong-provider error message defeats the point of one form
+        # for both.
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username/email or password",
         )
     logger.info("login_succeeded", user_id=user.id)
     return _issue_token_response(response, user, settings)
