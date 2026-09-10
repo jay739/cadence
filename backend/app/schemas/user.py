@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AliasChoices, BaseModel, EmailStr, Field
 
 from app.models.user import UserRole
 
@@ -13,8 +13,21 @@ class RegisterIn(BaseModel):
 
 
 class LoginIn(BaseModel):
-    email: EmailStr
+    """One login form for both backends.
+
+    The identifier is a local account's email OR a Navidrome username, so it cannot be an
+    EmailStr: Navidrome usernames are not addresses. `email` stays accepted as an alias so
+    existing clients keep working unchanged.
+    """
+
+    identifier: str = Field(
+        min_length=1,
+        max_length=320,
+        validation_alias=AliasChoices("identifier", "email"),
+    )
     password: str = Field(min_length=1, max_length=256)
+
+    model_config = {"populate_by_name": True}
 
 
 class UserOut(BaseModel):
