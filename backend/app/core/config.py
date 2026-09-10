@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     slskd_url: str | None = Field(default=None, alias="SLSKD_URL")
     slskd_api_key: str | None = Field(default=None, alias="SLSKD_API_KEY")
 
+    # Navidrome as an authentication backend, so library users sign in with the credentials
+    # they already have. Unset means local accounts only, which stays the default.
+    navidrome_url: str | None = Field(default=None, alias="NAVIDROME_URL")
+
     # --- Spotify (Client Credentials, app-only) ---
     spotify_client_id: str | None = Field(default=None, alias="SPOTIFY_CLIENT_ID")
     spotify_client_secret: str | None = Field(

@@ -11,10 +11,12 @@ For a single approved Request:
      live without redesigning this function), fall back to Soulseek via slskd: search, score
      candidates the same way (bitrate/format/filename plausibility), download the single best
      file, poll slskd until the transfer completes.
-  4. On completion of either path: move/rename the file into MUSIC_LIBRARY_PATH using the
-     configured pattern (via app.services.pathsafety, which guarantees the result cannot
-     escape the library root), tag it (preferring MusicBrainz canonical tags), mark the
-     request fulfilled with the final path recorded.
+  4. On completion of either path: file the track into MUSIC_LIBRARY_PATH using the configured
+     pattern (via app.services.pathsafety, which guarantees the result cannot escape the
+     library root), tag it (preferring MusicBrainz canonical tags), mark the request fulfilled
+     with the final path recorded. The Prowlarr path COPIES, because the source is the file
+     qBittorrent is still seeding and moving it errors the torrent; the slskd path MOVES,
+     because the source is Cadence's own staging dir and leaving it there leaks disk.
   5. On exhaustion of both paths: mark the request failed with a human-readable reason.
 
 Every step appends a FulfillmentAttempt row: what was searched, what candidates were seen,
@@ -24,6 +26,7 @@ mission, retrievable per request via GET /api/requests/{id}.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -92,6 +95,7 @@ async def _finalize_file(
     settings: Settings,
     *,
     source_file: Path,
+    preserve_source: bool = False,
 ) -> None:
     ext = extract_extension(source_file.name) or "bin"
     try:
@@ -111,7 +115,18 @@ async def _finalize_file(
         return
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(source_file), str(dest))
+    if preserve_source:
+        # Copy via a hidden sibling then swap, so a partial or failed copy never leaves a
+        # truncated file where the library (and Navidrome's scanner) expects a playable track.
+        # os.replace is atomic here because the temp file is in dest's own directory.
+        partial = dest.with_name(f".{dest.name}.partial")
+        try:
+            shutil.copy2(str(source_file), str(partial))
+            os.replace(str(partial), str(dest))
+        finally:
+            partial.unlink(missing_ok=True)
+    else:
+        shutil.move(str(source_file), str(dest))
 
     tag_title, tag_artist, tag_album = (
         request_row.title,
@@ -203,6 +218,7 @@ async def _try_prowlarr(
                 item.get("title", ""), request_row.preferred_format
             ),
             size_bytes=item.get("size"),
+            seeders=item.get("seeders"),
             extra={
                 "indexerId": item.get("indexerId"),
                 "indexer": item.get("indexer"),
@@ -306,7 +322,10 @@ async def _try_prowlarr(
         chosen_candidate=None,
         outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
     )
-    await _finalize_file(session, request_row, settings, source_file=source_file)
+    # preserve_source: this file is qBittorrent's, and it is still seeding it.
+    await _finalize_file(
+        session, request_row, settings, source_file=source_file, preserve_source=True
+    )
     return True
 
 
@@ -454,7 +473,10 @@ async def _try_slskd(
         chosen_candidate=None,
         outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
     )
-    await _finalize_file(session, request_row, settings, source_file=source_file)
+    # Move, not copy: source is Cadence's own staging dir, nothing is seeding it.
+    await _finalize_file(
+        session, request_row, settings, source_file=source_file, preserve_source=False
+    )
     return True
 
 
