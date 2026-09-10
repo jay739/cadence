@@ -270,6 +270,11 @@ class TestProwlarrSucceedsViaQbittorrent:
         assert request_row.final_file_path
         final_path = library_dir / request_row.final_file_path
         assert final_path.exists()
+        # The Prowlarr path copies instead of moving, because qBittorrent is still seeding
+        # this file and moving it errors the torrent. The source must survive the import,
+        # and the atomic swap must not leave a partial artifact in the library.
+        assert (content_dir / "Tum Hi Ho.flac").exists()
+        assert not list(final_path.parent.glob(".*.partial"))
 
         attempts = await _attempts_of(session, request_row.id)
         outcomes = {a.outcome for a in attempts if a.backend == "prowlarr"}
@@ -360,6 +365,9 @@ class TestProwlarrFallsBackToSlskd:
         assert request_row.final_file_path
         final_path = library_dir / request_row.final_file_path
         assert final_path.exists()
+        # The slskd path still moves: the source is Cadence's own staging dir, nothing is
+        # seeding it, and leaving it behind would leak disk on every request.
+        assert not (staging_dir / "Arijit Singh - Tum Hi Ho.flac").exists()
 
         attempts = await _attempts_of(session, request_row.id)
         backends_tried = [a.backend for a in attempts]
