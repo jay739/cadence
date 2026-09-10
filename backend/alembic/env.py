@@ -62,7 +62,14 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    # render_as_batch is required for SQLite, which cannot ALTER a column. Without it,
+    # autogenerate emits bare ALTER COLUMN statements that fail at runtime with a syntax
+    # error; with it, Alembic recreates and copies the table instead.
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        render_as_batch=True,
+    )
 
     with context.begin_transaction():
         context.run_migrations()

@@ -7,17 +7,34 @@ scorer, so tests can exercise the matching/tie-break rules without any network m
 from __future__ import annotations
 
 import difflib
+import html
 import re
 from dataclasses import dataclass
 
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _unescape_entities(value: str) -> str:
+    """Indexer titles arrive HTML-escaped, and some arrive double-escaped ("&amp;amp;").
+
+    Left alone, the stripping below turns those into literal "amp" tokens that pollute the
+    similarity score for any title containing an ampersand. Unescape until stable, bounded so
+    a pathological input cannot spin.
+    """
+    for _ in range(3):
+        unescaped = html.unescape(value)
+        if unescaped == value:
+            break
+        value = unescaped
+    return value
+
 
 # Formats ranked worst-to-best; used as a tiebreaker signal, never the sole criterion.
 _FORMAT_RANK = {"mp3": 1, "aac": 1, "m4a": 2, "ogg": 2, "flac": 4, "wav": 3, "alac": 4}
 
 
 def normalize_text(value: str) -> str:
-    value = value.lower()
+    value = _unescape_entities(value).lower()
     value = _NORMALIZE_RE.sub(" ", value)
     return " ".join(value.split())
 
@@ -55,6 +72,11 @@ def format_rank(ext: str) -> int:
 # candidate counts as matching, so ordering falls through to similarity exactly as before.
 PREFERRED_FORMATS = ("any", "mp3", "flac")
 
+# Above this, the fuzzy score has established song identity and the remaining decimals are
+# noise, so swarm health is allowed to decide between candidates. Below it, identity is still
+# in question and similarity has to lead.
+CONFIDENT_MATCH_SIMILARITY = 0.85
+
 
 def matches_preferred_format(raw_name: str, preferred: str) -> bool:
     """Whether a release/file name satisfies the requester's format preference.
@@ -82,23 +104,53 @@ class ScoredCandidate:
     size_bytes: int | None
     extra: dict
     matches_preference: bool = True
+    # Swarm health for torrent candidates. None means the concept does not apply (Soulseek
+    # transfers are peer-direct), and is treated as neutral rather than as zero.
+    seeders: int | None = None
+
+    @property
+    def seed_tier(self) -> int:
+        # Coarse tiers, so a healthy swarm outranks a nearly-dead one without letting raw
+        # seeder count override song identity (180 vs 200 seeders should not matter, 1 vs 50
+        # very much should). None sorts as the top tier so Soulseek candidates are never
+        # penalised for lacking a swarm.
+        if self.seeders is None:
+            return 4
+        if self.seeders <= 0:
+            return 0
+        if self.seeders < 3:
+            return 1
+        if self.seeders < 10:
+            return 2
+        if self.seeders < 50:
+            return 3
+        return 4
 
     @property
     def qualifies(self) -> bool:
         # A minimum similarity bar avoids grabbing an unrelated file just because it was the
         # only or largest result. 0.45 was chosen empirically as generous enough for messy
         # filenames (e.g. "01 - Artist_Title (Official).mp3") while rejecting clear mismatches.
+        # A torrent with no seeders is excluded outright: it is not a worse choice, it is an
+        # impossible one, and grabbing it burns the attempt budget waiting on metaDL forever.
+        if self.seeders is not None and self.seeders <= 0:
+            return False
         return self.similarity >= 0.45
 
     def sort_key(self) -> tuple:
         # Preference-matching candidates first (a no-op when the preference is "any", since
-        # everything matches), then highest similarity, then better format, then larger file
-        # (usually higher bitrate for the same format), as a deterministic tie-break chain.
-        # Preference outranks similarity deliberately: every candidate here already cleared
-        # the qualifying similarity bar, so they are all plausibly the right song, and the
-        # requester asked for this format.
+        # everything matches), then confident-match grouping, then swarm health, then exact
+        # similarity, format, and size as deterministic tie-breaks.
+        #
+        # The grouping is the important part. Above CONFIDENT_MATCH_SIMILARITY the fuzzy
+        # score has already established this is the right song, and the remaining decimals
+        # are string-matching noise; 1 seeder versus 50 is not noise. So among confident
+        # matches, swarm health decides and exact similarity only breaks the tie after it.
+        # Below that threshold identity is genuinely uncertain, so similarity leads again.
         return (
             0 if self.matches_preference else 1,
+            0 if self.similarity >= CONFIDENT_MATCH_SIMILARITY else 1,
+            -self.seed_tier,
             -self.similarity,
             -self.format_score,
             -(self.size_bytes or 0),
