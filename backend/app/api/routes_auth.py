@@ -12,7 +12,7 @@ from app.models.user import User, UserRole
 from app.schemas.user import LoginIn, RegisterIn, TokenOut, UserOut
 from app.services.users import (
     EmailAlreadyRegisteredError,
-    authenticate_user,
+    authenticate,
     create_user,
 )
 
@@ -76,7 +76,12 @@ async def login(
     session: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> TokenOut:
-    user = await authenticate_user(session, email=body.email, password=body.password)
+    user = await authenticate(
+        session,
+        identifier=body.identifier,
+        password=body.password,
+        navidrome_url=settings.navidrome_url,
+    )
     if user is None:
         logger.info("login_failed")
         raise HTTPException(
