@@ -4,7 +4,8 @@ import type { User } from "../types/api";
 export interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  // identifier: a local account's email, or a Navidrome username.
+  login: (identifier: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }

@@ -31,9 +31,29 @@ class TestHealth:
             "qbittorrent",
             "slskd",
             "spotify",
+            "navidrome",
         }
         for status in integrations.values():
             assert status["configured"] is False
+
+    async def test_navidrome_configured_when_url_is_set(self, app_client, monkeypatch):
+        # The login page reads this pre-auth to decide whether to offer a Navidrome sign-in
+        # tab at all, so it has to flip true purely from the URL being set, same as every
+        # other integration here.
+        monkeypatch.setenv("NAVIDROME_URL", "http://navidrome.internal:4533")
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+        resp = await app_client.get("/api/health")
+        assert resp.json()["integrations"]["navidrome"]["configured"] is True
+
+    async def test_navidrome_never_leaks_its_url(self, app_client, monkeypatch):
+        monkeypatch.setenv("NAVIDROME_URL", "http://internal-navidrome.example:4533")
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+        resp = await app_client.get("/api/health")
+        assert "internal-navidrome" not in resp.text
 
     async def test_health_never_leaks_secrets_or_urls(self, app_client, monkeypatch):
         monkeypatch.setenv("PROWLARR_URL", "http://internal-prowlarr.example:9696")

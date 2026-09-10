@@ -86,10 +86,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ email, password }),
       }),
-    login: (email: string, password: string) =>
+    // identifier is a local account's email OR a Navidrome username; the backend accepts
+    // either under the same field (see backend/app/schemas/user.py's LoginIn).
+    login: (identifier: string, password: string) =>
       request<AuthResponse>("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ identifier, password }),
       }),
     logout: () => request<void>("/api/auth/logout", { method: "POST" }),
     me: () => request<User>("/api/auth/me"),
