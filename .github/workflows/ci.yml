@@ -40,7 +40,13 @@ jobs:
 
       - name: Dependency audit (fails on high/critical)
         working-directory: backend
-        run: pip-audit --strict --desc -r <(pip freeze) || pip-audit --strict --desc
+        # --exclude-editable drops the self-installed `cadence` package from the input. Without
+        # it, pip freeze reports cadence's source as this (private) repo's own URL, pip-audit
+        # tries to git-clone it to resolve the version, and fails with "could not read Username
+        # for 'https://github.com'". pip-audit's own --skip-editable does not fix this: run
+        # directly against the live env (no -r), it still hard-errors on the editable
+        # distribution instead of skipping it, so the fix has to happen on the input side.
+        run: pip-audit --strict --desc -r <(pip freeze --exclude-editable)
 
   web:
     name: Web client (lint, typecheck, build, unit test)
