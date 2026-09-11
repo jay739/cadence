@@ -216,3 +216,25 @@ test.describe("Admin integration settings", () => {
     });
   });
 });
+
+test.describe("Glass surfaces", () => {
+  test("the sticky header and panels actually resolve a backdrop blur", async ({ page }) => {
+    await login(page, USER_EMAIL, USER_PASSWORD);
+    await page.goto("/requests");
+
+    // A computed-style check rather than a screenshot comparison: the point is to catch the
+    // frosted treatment silently collapsing (a renamed/removed --glass-blur token leaves an
+    // invalid property, which resolves to "none" while everything still renders fine), which
+    // no functional assertion elsewhere would notice.
+    const headerFilter = await page
+      .locator(".shell__header")
+      .evaluate((el) => getComputedStyle(el).backdropFilter);
+    expect(headerFilter).toContain("blur");
+
+    const cardFilter = await page
+      .locator(".request-row")
+      .first()
+      .evaluate((el) => getComputedStyle(el).backdropFilter);
+    expect(cardFilter).toContain("blur");
+  });
+});

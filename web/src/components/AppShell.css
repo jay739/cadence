@@ -9,11 +9,30 @@
   align-items: center;
   gap: var(--space-6);
   padding: var(--space-4) var(--space-6);
-  border-bottom: 1px solid var(--color-line);
-  background: var(--color-bg-raised);
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  /* Prefixed first, standard last: see the note on .card in styles/base.css. */
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(135%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(135%);
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  .shell__header {
+    background: var(--color-bg-raised);
+    border-bottom-color: var(--color-line);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .shell__header {
+    background: var(--color-bg-raised);
+    border-bottom-color: var(--color-line);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 .shell__brand {
