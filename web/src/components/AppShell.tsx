@@ -23,6 +23,9 @@ export function AppShell() {
           <NavLink to="/requests" className="shell__nav-link">
             Your requests
           </NavLink>
+          <NavLink to="/profile" className="shell__nav-link">
+            Profile
+          </NavLink>
           {user?.role === "admin" && (
             <NavLink to="/admin" className="shell__nav-link">
               Approval queue

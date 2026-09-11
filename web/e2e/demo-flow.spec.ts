@@ -92,10 +92,16 @@ test.describe("Demo mode: request lifecycle", () => {
 });
 
 test.describe("Demo mode: request history and fulfillment visibility", () => {
-  test("the seeded demo request queue covers every status", async ({ page }) => {
+  test("the seeded demo request queue covers every status, with fulfilled/failed detail views reachable", async ({
+    page,
+  }) => {
     // All seeded demo requests belong to the demo listener account (see
     // backend/app/demo/data.py / seed.py), not the admin account, so history must be checked
-    // as that user for the seeded statuses to be visible.
+    // as that user for the seeded statuses to be visible. These three checks used to be
+    // separate tests; merged into one so this describe block spends only one of the suite's
+    // /api/auth/login calls -- AUTH_RATE_LIMIT is 10/minute per IP and this whole file runs
+    // from the same IP well within a minute, so every login() call in this file draws from one
+    // shared budget.
     await login(page, USER_EMAIL, USER_PASSWORD);
     await page.goto("/requests");
 
@@ -109,40 +115,19 @@ test.describe("Demo mode: request history and fulfillment visibility", () => {
     await expect(page.getByText("Downloaded").first()).toBeVisible();
     await expect(page.getByText("Declined").first()).toBeVisible();
     await expect(page.getByText("Download failed").first()).toBeVisible();
-  });
-
-  test("a fulfilled seeded request shows its filed path in the detail view", async ({ page }) => {
-    await login(page, USER_EMAIL, USER_PASSWORD);
-    await page.goto("/requests");
-
-    const anyRow = page.locator(".request-row").first();
-    const emptyState = page.locator(".empty-state");
-    await expect(anyRow.or(emptyState)).toBeVisible();
 
     const fulfilledRow = page.locator(".request-row", { hasText: "Downloaded" }).first();
-    if ((await fulfilledRow.count()) === 0) {
-      test.skip(true, "No fulfilled seed row visible for this user in this run");
-      return;
+    if ((await fulfilledRow.count()) > 0) {
+      await fulfilledRow.click();
+      await expect(page.getByText("Filed at")).toBeVisible();
+      await page.goto("/requests");
     }
-    await fulfilledRow.click();
-    await expect(page.getByText("Filed at")).toBeVisible();
-  });
-
-  test("a failed seeded request shows its failure reason in the detail view", async ({ page }) => {
-    await login(page, USER_EMAIL, USER_PASSWORD);
-    await page.goto("/requests");
-
-    const anyRow = page.locator(".request-row").first();
-    const emptyState = page.locator(".empty-state");
-    await expect(anyRow.or(emptyState)).toBeVisible();
 
     const failedRow = page.locator(".request-row", { hasText: "Failed" }).first();
-    if ((await failedRow.count()) === 0) {
-      test.skip(true, "No failed seed row visible for this user in this run");
-      return;
+    if ((await failedRow.count()) > 0) {
+      await failedRow.click();
+      await expect(page.getByText("Why it failed")).toBeVisible();
     }
-    await failedRow.click();
-    await expect(page.getByText("Why it failed")).toBeVisible();
   });
 });
 
@@ -214,7 +199,11 @@ test.describe("Theme toggle", () => {
 });
 
 test.describe("Admin integration settings", () => {
-  test("an admin can open the settings page, edit a field, and save it", async ({ page }) => {
+  test("an admin can open the settings page, edit and save a field, and run a test connection", async ({
+    page,
+  }) => {
+    // Merged from two tests into one, for the same shared-login-budget reason noted in the
+    // "request history" describe block above.
     await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
     await page.getByRole("link", { name: "Settings" }).click();
@@ -242,13 +231,6 @@ test.describe("Admin integration settings", () => {
     // source), proving the round trip (not just an optimistic local echo).
     await expect(prowlarrSection.getByText("saved")).toBeVisible();
     await expect(urlInput).toHaveValue("http://prowlarr.example.internal:9696");
-  });
-
-  test("test connection reports a failure for an unreachable demo host without crashing", async ({
-    page,
-  }) => {
-    await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-    await page.goto("/admin/settings");
 
     const slskdSection = page
       .locator(".settings-section")
@@ -262,5 +244,49 @@ test.describe("Admin integration settings", () => {
     await expect(slskdSection.locator(".form-error, .settings-test-ok")).toBeVisible({
       timeout: 15_000,
     });
+  });
+});
+
+test.describe("Profile page", () => {
+  test("a user can see their request stats, gets a wrong-password rejection, and can save an avatar URL", async ({
+    page,
+  }) => {
+    // One login() call for this whole scenario, for the same shared-rate-limit-budget reason
+    // noted in the "request history" describe block above.
+    await login(page, USER_EMAIL, USER_PASSWORD);
+
+    await page.getByRole("link", { name: "Profile" }).click();
+    await expect(page).toHaveURL(/\/profile$/);
+    await expect(page.getByRole("heading", { name: "Your requests" })).toBeVisible();
+
+    // Fulfilled/Rejected/Failed each have exactly one seeded demo request, and unlike
+    // Pending/Approved, no other test in this file mutates those specific statuses.
+    for (const label of ["Fulfilled", "Rejected", "Failed"]) {
+      const tile = page.locator(".stat-tile", { hasText: label });
+      await expect(tile.locator(".stat-tile__value")).toHaveText("1");
+    }
+
+    // The local demo account gets a password-change form, never the Navidrome redirect link.
+    await expect(page.getByLabel("Current password")).toBeVisible();
+    await expect(page.getByLabel("New password")).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /manage your password in navidrome/i }),
+    ).toHaveCount(0);
+
+    // A wrong current password must be rejected without disturbing the real demo credentials
+    // other tests in this suite rely on.
+    await page.getByLabel("Current password").fill("definitely-the-wrong-password");
+    await page.getByLabel("New password").fill("a-brand-new-password-2");
+    await page.getByRole("button", { name: "Change password" }).click();
+    await expect(page.getByText("Current password is incorrect")).toBeVisible();
+
+    const avatarInput = page.getByLabel("Avatar URL");
+    await avatarInput.fill("https://picsum.photos/seed/e2e-avatar/200");
+    await page.getByRole("button", { name: "Save avatar" }).click();
+
+    // Once saved, the draft matches the persisted value again, so the button goes back to
+    // disabled -- proving a real round trip rather than an optimistic local echo.
+    await expect(page.getByRole("button", { name: "Save avatar" })).toBeDisabled();
+    await expect(avatarInput).toHaveValue("https://picsum.photos/seed/e2e-avatar/200");
   });
 });

@@ -8,7 +8,7 @@ from app.api.deps import get_current_user, get_db
 from app.core.config import Settings, get_settings
 from app.core.limiter import auth_rate_limit, limiter
 from app.core.security import create_session_token
-from app.models.user import User, UserRole
+from app.models.user import AuthProvider, User, UserRole
 from app.schemas.user import LoginIn, RegisterIn, TokenOut, UserOut, WebhookUrlIn
 from app.services.users import (
     EmailAlreadyRegisteredError,
@@ -24,7 +24,22 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 COOKIE_NAME = "cadence_session"
 
 
-def _issue_token_response(
+def build_user_out(user: User, settings: Settings) -> UserOut:
+    """Shared "current user" serializer, used by every route (register/login/me, and the
+    profile routes in app.api.routes_users) that needs to hand the client a UserOut.
+
+    `navidrome_url` cannot come from `model_validate`'s from_attributes lookup (it is not a
+    column on User), so it is filled in explicitly here, and only for a Navidrome-backed
+    account -- this is what the frontend's profile page links to for password changes, since
+    Cadence never stores a password for these accounts to change itself.
+    """
+    out = UserOut.model_validate(user)
+    if user.auth_provider is AuthProvider.NAVIDROME:
+        out.navidrome_url = settings.navidrome_url
+    return out
+
+
+def issue_token_response(
     response: Response, user: User, settings: Settings
 ) -> TokenOut:
     token = create_session_token(
@@ -43,7 +58,7 @@ def _issue_token_response(
         max_age=settings.session_ttl_minutes * 60,
         path="/",
     )
-    return TokenOut(access_token=token, user=UserOut.model_validate(user))
+    return TokenOut(access_token=token, user=build_user_out(user, settings))
 
 
 @router.post("/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
@@ -65,7 +80,7 @@ async def register(
             status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
         ) from exc
     logger.info("user_registered", user_id=user.id)
-    return _issue_token_response(response, user, settings)
+    return issue_token_response(response, user, settings)
 
 
 @router.post("/login", response_model=TokenOut)
@@ -93,7 +108,7 @@ async def login(
             detail="Invalid username/email or password",
         )
     logger.info("login_succeeded", user_id=user.id)
-    return _issue_token_response(response, user, settings)
+    return issue_token_response(response, user, settings)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -102,8 +117,11 @@ async def logout(response: Response) -> None:
 
 
 @router.get("/me", response_model=UserOut)
-async def me(user: User = Depends(get_current_user)) -> UserOut:
-    return UserOut.model_validate(user)
+async def me(
+    user: User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> UserOut:
+    return build_user_out(user, settings)
 
 
 @router.patch("/me/webhook", response_model=UserOut)
@@ -111,6 +129,7 @@ async def update_webhook_url(
     body: WebhookUrlIn,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> UserOut:
     """Set or clear the caller's own webhook URL.
 
@@ -122,4 +141,4 @@ async def update_webhook_url(
     logger.info(
         "webhook_url_updated", user_id=user.id, cleared=body.webhook_url is None
     )
-    return UserOut.model_validate(user)
+    return build_user_out(user, settings)
