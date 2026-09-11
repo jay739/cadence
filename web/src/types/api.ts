@@ -69,12 +69,7 @@ export interface MultiSearchResponse {
 }
 
 export type RequestStatus =
-  | "pending"
-  | "approved"
-  | "downloading"
-  | "fulfilled"
-  | "rejected"
-  | "failed";
+  "pending" | "approved" | "downloading" | "fulfilled" | "rejected" | "failed";
 
 export interface RequestRecord {
   id: string;
