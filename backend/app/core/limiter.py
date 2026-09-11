@@ -22,6 +22,10 @@ SEARCH_RATE_LIMIT = "30/minute"
 # 60/minute still respects MusicBrainz's own 1-req/sec ceiling as the effective upper bound.
 SEARCH_STREAM_RATE_LIMIT = "60/minute"
 REQUEST_CREATE_RATE_LIMIT = "20/minute"
+# Tighter than create: a single retry can fan out across all three fulfillment tiers, each
+# trying up to FULFILLMENT_MAX_CANDIDATE_ATTEMPTS candidates, so the real external-call cost
+# per click is higher than a plain search or a new request.
+REQUEST_RETRY_RATE_LIMIT = "10/minute"
 # Spotify personalization: connect/disconnect are state-changing and infrequent in normal use
 # (same budget as auth); the library-browse routes each make a real outbound Spotify call
 # (and, in the worst case, a token refresh), so they get the same budget as /api/search.

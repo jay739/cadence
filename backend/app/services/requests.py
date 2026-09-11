@@ -139,3 +139,27 @@ async def reject_request(
     await session.commit()
     await session.refresh(request_row)
     return request_row
+
+
+class RequestNotFailedError(Exception):
+    """Retry only makes sense on a request that actually failed.
+
+    Unlike approve_request (which has always applied unconditionally to any status, mechanically
+    correct but not obviously a "retry" action), retry is guarded: it should read as "try this
+    specific failure again", not as a second way to approve a pending request.
+    """
+
+
+async def retry_request(session: AsyncSession, request_row: Request) -> Request:
+    if request_row.status != RequestStatus.FAILED:
+        raise RequestNotFailedError(request_row.status.value)
+    request_row.status = RequestStatus.APPROVED
+    # Cleared, not preserved: a stale reason from the LAST attempt would be actively
+    # misleading once a fresh attempt is in flight, and the full history survives regardless
+    # in the FulfillmentAttempt audit trail (fulfillment_attempts_count is never reset either,
+    # for the same reason: it is a lifetime count across every attempt this request has ever
+    # made, not just the most recent one).
+    request_row.failure_reason = None
+    await session.commit()
+    await session.refresh(request_row)
+    return request_row

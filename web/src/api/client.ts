@@ -137,6 +137,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ note: note ?? null }),
       }),
+    retry: (id: string) =>
+      request<RequestRecord>(`/api/requests/${id}/retry`, {
+        method: "POST",
+      }),
   },
   health: {
     get: () => request<HealthResponse>("/api/health"),
