@@ -4,11 +4,28 @@
 
 export type UserRole = "user" | "admin";
 
+export type AuthProvider = "local" | "navidrome";
+
 export interface User {
   id: string;
   email: string;
   role: UserRole;
+  auth_provider: AuthProvider;
+  avatar_url: string | null;
+  // Only ever set for a "navidrome" account: where to send that user to manage their own
+  // password, since Cadence never stores one for them.
+  navidrome_url: string | null;
   created_at: string;
+}
+
+export interface RequestStatusCounts {
+  pending: number;
+  approved: number;
+  downloading: number;
+  fulfilled: number;
+  rejected: number;
+  failed: number;
+  total: number;
 }
 
 export interface AuthResponse {
@@ -52,7 +69,12 @@ export interface MultiSearchResponse {
 }
 
 export type RequestStatus =
-  "pending" | "approved" | "downloading" | "fulfilled" | "rejected" | "failed";
+  | "pending"
+  | "approved"
+  | "downloading"
+  | "fulfilled"
+  | "rejected"
+  | "failed";
 
 export interface RequestRecord {
   id: string;

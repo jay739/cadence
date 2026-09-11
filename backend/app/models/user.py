@@ -66,6 +66,10 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
+    # A plain URL, matching the existing `artwork_url` pattern on Request: no upload/object
+    # storage here, just a link the user supplies (e.g. a Gravatar or self-hosted image URL).
+    avatar_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
     # Session/token rotation: bumping this invalidates all previously issued session tokens.
     token_version: Mapped[int] = mapped_column(default=0, nullable=False)
 

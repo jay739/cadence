@@ -107,6 +107,23 @@ async def list_requests_for_user(session: AsyncSession, user_id: str) -> list[Re
     return list(result.scalars().all())
 
 
+async def get_request_status_counts(
+    session: AsyncSession, user_id: str
+) -> dict[str, int]:
+    """Per-status counts of a user's own requests, for the profile page's stats section.
+
+    Deliberately reuses `list_requests_for_user` and counts in Python rather than issuing a
+    `GROUP BY` query: a single requester's row count is small (one track per row, no
+    album/artist bulk requests exist in this schema), so a second, heavier query pattern isn't
+    justified just to move the counting from Python into SQL.
+    """
+    rows = await list_requests_for_user(session, user_id)
+    counts = {status.value: 0 for status in RequestStatus}
+    for row in rows:
+        counts[row.status.value] += 1
+    return counts
+
+
 async def list_pending_requests(session: AsyncSession) -> list[Request]:
     result = await session.execute(
         select(Request)
