@@ -11,6 +11,21 @@
     />
     <meta name="color-scheme" content="dark light" />
     <title>Cadence</title>
+    <script>
+      // Runs before first paint so a stored theme choice applies immediately, matching the
+      // storage key ThemeToggle.tsx writes to. No stored choice: leave the attribute unset
+      // and let tokens.css's prefers-color-scheme media query decide.
+      (function () {
+        try {
+          var stored = localStorage.getItem("cadence-theme");
+          if (stored === "light" || stored === "dark") {
+            document.documentElement.dataset.theme = stored;
+          }
+        } catch {
+          // Storage inaccessible (private browsing, disabled storage): fall back silently.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
