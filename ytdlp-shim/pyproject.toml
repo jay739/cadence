@@ -1,5 +1,11 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Explicit, not relying on pytest's implicit rootdir-insertion: this repo has no [project]
+# table (the shim is not meant to be pip-installed, only run in place via uvicorn), so `app`
+# is only importable if something puts this directory on sys.path. Worked locally without
+# this by coincidence of how that local run's pytest resolved its rootdir; failed outright in
+# CI's fresh runner with ModuleNotFoundError for the same command from the same directory.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
