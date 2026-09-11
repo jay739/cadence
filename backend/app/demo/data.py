@@ -158,6 +158,27 @@ def demo_search_results(query: str) -> list[SourceSearchResult]:
     ]
 
 
+def demo_resolve_track_link(platform: str, native_id: str) -> TrackResult:
+    """Deterministic fake single-track resolution for POST /api/search/resolve-link in demo
+    mode, mirroring demo_search_results above: no real network call (a pasted Spotify link
+    would otherwise hit the real, keyless-friendly Apple API or require real Spotify
+    credentials neither of which demo mode has), and the same link resolves to the same fake
+    track every time it's pasted.
+    """
+    index = _seed_index(native_id, f"resolve-{platform}") % len(_DEMO_CATALOG)
+    t = _DEMO_CATALOG[index]
+    return TrackResult(
+        source=platform,
+        source_id=native_id,
+        title=t["title"],
+        artist=t["artist"],
+        album=t["album"],
+        year=t["year"],
+        duration_seconds=180 + (index * 7) % 90,
+        artwork_url=_ARTWORK_PLACEHOLDER.format(seed=f"{platform}{native_id}"),
+    )
+
+
 class _RequestSeed(TypedDict, total=False):
     title: str
     artist: str
