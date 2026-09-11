@@ -180,3 +180,46 @@ class TestCookieSecureKnob:
             # HttpOnly must survive the knob: only the Secure attribute is configurable.
             assert "HttpOnly" in set_cookie
         get_settings.cache_clear()
+
+
+class TestAuthRateLimitIsConfigurable:
+    """The limit is keyed by client IP, so a shared egress (or the e2e suite, which signs in
+    once per test from one address) can exhaust the default through ordinary use."""
+
+    async def test_default_limit_still_rejects_a_burst(self, app_client):
+        statuses = []
+        for _ in range(14):
+            resp = await app_client.post(
+                "/api/auth/login",
+                json={"identifier": "nobody@example.com", "password": "wrong-password-1"},
+            )
+            statuses.append(resp.status_code)
+        # Unchanged default: the burst is cut off rather than answered indefinitely.
+        assert 429 in statuses
+
+    async def test_raising_the_limit_lets_the_same_burst_through(
+        self, tmp_path, monkeypatch
+    ):
+        from app.core.config import get_settings
+        from app.main import create_app
+        from tests.integration.conftest import _run_with_lifespan, _set_test_env
+
+        _set_test_env(monkeypatch, tmp_path, demo_mode=False)
+        monkeypatch.setenv("AUTH_RATE_LIMIT", "500/minute")
+        get_settings.cache_clear()
+        app = create_app()
+        async for client in _run_with_lifespan(app):
+            statuses = []
+            for _ in range(14):
+                resp = await client.post(
+                    "/api/auth/login",
+                    json={
+                        "identifier": "nobody@example.com",
+                        "password": "wrong-password-1",
+                    },
+                )
+                statuses.append(resp.status_code)
+            # Same burst that trips the default: every one is answered on its own merits
+            # (401 for the bad credentials) rather than being rate limited.
+            assert 429 not in statuses
+        get_settings.cache_clear()
