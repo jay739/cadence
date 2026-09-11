@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.core.config import Settings, get_settings
-from app.core.limiter import AUTH_RATE_LIMIT, limiter
+from app.core.limiter import auth_rate_limit, limiter
 from app.core.security import create_session_token
 from app.models.user import User, UserRole
 from app.schemas.user import LoginIn, RegisterIn, TokenOut, UserOut
@@ -46,7 +46,7 @@ def _issue_token_response(
 
 
 @router.post("/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
-@limiter.limit(AUTH_RATE_LIMIT)
+@limiter.limit(auth_rate_limit)
 async def register(
     request: Request,
     body: RegisterIn,
@@ -68,7 +68,7 @@ async def register(
 
 
 @router.post("/login", response_model=TokenOut)
-@limiter.limit(AUTH_RATE_LIMIT)
+@limiter.limit(auth_rate_limit)
 async def login(
     request: Request,
     body: LoginIn,
