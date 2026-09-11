@@ -63,8 +63,15 @@
   --glass-blur: 14px;
 }
 
+/*
+  Light palette applies two ways: automatically when the OS prefers light and the visitor
+  has never chosen explicitly (the media-query block, guarded so an explicit dark choice
+  still wins over the OS), or forced regardless of OS via [data-theme="light"] set by
+  ThemeToggle. The values are repeated rather than shared because a plain :root selector and
+  one scoped to a media query can't reuse the same declaration block.
+*/
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     --color-bg: #f5f1e7;
     --color-bg-raised: #fffdf8;
     --color-bg-inset: #ece5d5;
@@ -87,6 +94,23 @@
   }
 }
 
+:root[data-theme="light"] {
+  --color-bg: #f5f1e7;
+  --color-bg-raised: #fffdf8;
+  --color-bg-inset: #ece5d5;
+  --color-line: #ddd3bd;
+  --color-line-soft: #e8e1d0;
+  --color-text: #211d15;
+  --color-text-muted: #5d5646;
+  --color-text-faint: #948c78;
+
+  --color-accent: #a56b12;
+  --color-accent-strong: #8a5a0f;
+  --color-accent-ink: #fff8ea;
+
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 20px rgba(60, 45, 10, 0.12);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -103,6 +127,9 @@ body {
   color: var(--color-text);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
+  transition:
+    background-color 0.25s ease-out,
+    color 0.25s ease-out;
 }
 
 /*

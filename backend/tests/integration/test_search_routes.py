@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from tests.integration.conftest import register_and_login
+from tests.integration.conftest import make_admin_headers, register_and_login
 
 pytestmark = pytest.mark.asyncio
 
@@ -214,3 +214,241 @@ class TestSearchStreamLiveMode:
         events = _parse_sse_source_events(resp.text)
         source_order = [e["source"] for e in events]
         assert source_order.index("apple") < source_order.index("musicbrainz")
+
+
+async def _configure_spotify(app_client, headers) -> None:
+    resp = await app_client.put(
+        "/api/admin/settings/spotify",
+        json={
+            "spotify_client_id": "test-client-id",
+            "spotify_client_secret": "test-secret",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+
+class TestResolveLinkAuth:
+    async def test_requires_authentication(self, app_client):
+        resp = await app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y"},
+        )
+        assert resp.status_code == 401
+
+
+class TestResolveLinkValidation:
+    async def test_unrecognized_url_is_rejected_with_specific_message(
+        self, demo_app_client
+    ):
+        headers = await register_and_login(
+            demo_app_client, "resolvebadhost@example.com", "a-strong-password-1"
+        )
+        resp = await demo_app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "https://youtube.com/watch?v=dQw4w9WgXcQ"},
+            headers=headers,
+        )
+        assert resp.status_code == 422
+        assert "Spotify or Apple Music" in resp.json()["detail"]
+
+    async def test_malformed_url_is_rejected(self, demo_app_client):
+        headers = await register_and_login(
+            demo_app_client, "resolvemalformed@example.com", "a-strong-password-1"
+        )
+        resp = await demo_app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "not a url at all"},
+            headers=headers,
+        )
+        assert resp.status_code == 422
+
+    async def test_empty_url_is_rejected_by_schema_validation(self, demo_app_client):
+        headers = await register_and_login(
+            demo_app_client, "resolveempty@example.com", "a-strong-password-1"
+        )
+        resp = await demo_app_client.post(
+            "/api/search/resolve-link", json={"url": ""}, headers=headers
+        )
+        assert resp.status_code == 422
+
+    async def test_spotify_non_track_link_is_rejected_with_specific_message(
+        self, demo_app_client
+    ):
+        headers = await register_and_login(
+            demo_app_client, "resolveplaylist@example.com", "a-strong-password-1"
+        )
+        resp = await demo_app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"},
+            headers=headers,
+        )
+        assert resp.status_code == 422
+        assert "Spotify" in resp.json()["detail"]
+
+
+class TestResolveLinkDemoMode:
+    async def test_valid_spotify_track_url_resolves(self, demo_app_client):
+        headers = await register_and_login(
+            demo_app_client, "resolvespotifydemo@example.com", "a-strong-password-1"
+        )
+        resp = await demo_app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y"},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["source"] == "spotify"
+        assert body["source_id"] == "6y0igZArWVi6Iz0rj35c1Y"
+        assert body["title"]
+        assert body["artist"]
+
+    async def test_valid_apple_music_song_link_resolves(self, demo_app_client):
+        headers = await register_and_login(
+            demo_app_client, "resolveappledemo@example.com", "a-strong-password-1"
+        )
+        resp = await demo_app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "https://music.apple.com/us/song/tum-hi-ho/643421652"},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["source"] == "apple"
+        assert body["source_id"] == "643421652"
+
+    async def test_valid_apple_music_album_link_with_track_param_resolves(
+        self, demo_app_client
+    ):
+        headers = await register_and_login(
+            demo_app_client, "resolveapplealbumdemo@example.com", "a-strong-password-1"
+        )
+        resp = await demo_app_client.post(
+            "/api/search/resolve-link",
+            json={
+                "url": "https://music.apple.com/in/album/aashiqui-2/643421641?i=643421652"
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["source_id"] == "643421652"
+
+    async def test_same_link_resolves_to_the_same_fake_track_twice(
+        self, demo_app_client
+    ):
+        headers = await register_and_login(
+            demo_app_client, "resolvestabledemo@example.com", "a-strong-password-1"
+        )
+        payload = {"url": "https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y"}
+        first = await demo_app_client.post(
+            "/api/search/resolve-link", json=payload, headers=headers
+        )
+        second = await demo_app_client.post(
+            "/api/search/resolve-link", json=payload, headers=headers
+        )
+        assert first.json() == second.json()
+
+
+class TestResolveLinkLiveMode:
+    async def test_valid_apple_music_link_resolves(self, app_client, httpx_mock):
+        headers = await register_and_login(
+            app_client, "resolveapplelive@example.com", "a-strong-password-1"
+        )
+        httpx_mock.add_response(
+            url="https://itunes.apple.com/lookup?id=643421652&entity=song",
+            json={
+                "results": [
+                    {
+                        "trackId": 643421652,
+                        "trackName": "Tum Hi Ho",
+                        "artistName": "Arijit Singh",
+                        "collectionName": "Aashiqui 2",
+                        "trackTimeMillis": 262000,
+                        "artworkUrl100": "https://example.test/100x100bb.jpg",
+                        "releaseDate": "2013-04-26T00:00:00Z",
+                    }
+                ]
+            },
+        )
+        resp = await app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "https://music.apple.com/us/song/tum-hi-ho/643421652"},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["source"] == "apple"
+        assert body["source_id"] == "643421652"
+        assert body["title"] == "Tum Hi Ho"
+        assert body["artist"] == "Arijit Singh"
+
+    async def test_apple_track_not_found_returns_specific_404(
+        self, app_client, httpx_mock
+    ):
+        headers = await register_and_login(
+            app_client, "resolveapplenotfound@example.com", "a-strong-password-1"
+        )
+        httpx_mock.add_response(json={"resultCount": 0, "results": []})
+        resp = await app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "https://music.apple.com/us/song/does-not-exist/000000000"},
+            headers=headers,
+        )
+        assert resp.status_code == 404
+        assert "Apple Music" in resp.json()["detail"]
+
+    async def test_valid_spotify_track_url_resolves_when_configured(
+        self, app_client, httpx_mock
+    ):
+        admin_headers = await make_admin_headers(app_client)
+        await _configure_spotify(app_client, admin_headers)
+        headers = await register_and_login(
+            app_client, "resolvespotifylive@example.com", "a-strong-password-1"
+        )
+
+        httpx_mock.add_response(
+            url="https://accounts.spotify.com/api/token",
+            json={"access_token": "tok123", "expires_in": 3600},
+        )
+        httpx_mock.add_response(
+            url="https://api.spotify.com/v1/tracks?ids=6y0igZArWVi6Iz0rj35c1Y",
+            json={
+                "tracks": [
+                    {
+                        "id": "6y0igZArWVi6Iz0rj35c1Y",
+                        "name": "Tum Hi Ho",
+                        "artists": [{"name": "Arijit Singh"}],
+                        "album": {
+                            "name": "Aashiqui 2",
+                            "images": [{"url": "https://example.test/art.jpg"}],
+                            "release_date": "2013-04-26",
+                        },
+                        "duration_ms": 262000,
+                    }
+                ]
+            },
+        )
+        resp = await app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y"},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["source"] == "spotify"
+        assert body["title"] == "Tum Hi Ho"
+
+    async def test_spotify_link_without_operator_config_returns_specific_400(
+        self, app_client
+    ):
+        headers = await register_and_login(
+            app_client, "resolvespotifyunconfigured@example.com", "a-strong-password-1"
+        )
+        resp = await app_client.post(
+            "/api/search/resolve-link",
+            json={"url": "https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y"},
+            headers=headers,
+        )
+        assert resp.status_code == 400
+        assert "Spotify" in resp.json()["detail"]

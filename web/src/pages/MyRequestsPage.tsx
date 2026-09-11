@@ -1,10 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import "./ListPages.css";
 
 export function MyRequestsPage() {
+  const queryClient = useQueryClient();
+
   const { data, isLoading, isError } = useQuery({
     queryKey: ["my-requests"],
     queryFn: () => api.requests.mine(),
@@ -12,6 +14,13 @@ export function MyRequestsPage() {
       const rows = query.state.data ?? [];
       const hasActive = rows.some((r) => r.status === "approved" || r.status === "downloading");
       return hasActive ? 4000 : false;
+    },
+  });
+
+  const retry = useMutation({
+    mutationFn: (id: string) => api.requests.retry(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-requests"] });
     },
   });
 
@@ -47,6 +56,25 @@ export function MyRequestsPage() {
                 </div>
                 <StatusBadge status={request.status} />
               </Link>
+              {request.status === "failed" && (
+                <div className="request-row__actions">
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    disabled={retry.isPending && retry.variables === request.id}
+                    onClick={() => retry.mutate(request.id)}
+                  >
+                    Retry
+                  </button>
+                  {retry.isError && retry.variables === request.id && (
+                    <p className="form-error request-row__retry-error">
+                      {retry.error instanceof ApiError
+                        ? retry.error.message
+                        : "Couldn't retry this request. Try again."}
+                    </p>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

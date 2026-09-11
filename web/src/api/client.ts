@@ -106,6 +106,15 @@ export const api = {
     // the session cookie automatically instead, same-origin.
     streamUrl: (q: string, limit = 20) =>
       `${API_BASE}/api/search/stream?${new URLSearchParams({ q, limit: String(limit) })}`,
+    // Resolves one exact track from a pasted Spotify/Apple Music link, as an alternative to
+    // free-text search. A 422 (unrecognized link) or 404 (recognized platform, track not
+    // found) surfaces via ApiError with the backend's specific, actionable message already in
+    // `.message` — see backend/app/services/link_resolve.py for the exact wording.
+    resolveLink: (url: string) =>
+      request<TrackResult>("/api/search/resolve-link", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      }),
   },
   requests: {
     create: (payload: {
@@ -136,6 +145,10 @@ export const api = {
       request<RequestRecord>(`/api/requests/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ note: note ?? null }),
+      }),
+    retry: (id: string) =>
+      request<RequestRecord>(`/api/requests/${id}/retry`, {
+        method: "POST",
       }),
   },
   health: {

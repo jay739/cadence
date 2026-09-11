@@ -9,11 +9,12 @@ from app.core.config import Settings, get_settings
 from app.core.limiter import auth_rate_limit, limiter
 from app.core.security import create_session_token
 from app.models.user import User, UserRole
-from app.schemas.user import LoginIn, RegisterIn, TokenOut, UserOut
+from app.schemas.user import LoginIn, RegisterIn, TokenOut, UserOut, WebhookUrlIn
 from app.services.users import (
     EmailAlreadyRegisteredError,
     authenticate,
     create_user,
+    set_webhook_url,
 )
 
 logger = structlog.get_logger(__name__)
@@ -102,4 +103,23 @@ async def logout(response: Response) -> None:
 
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)) -> UserOut:
+    return UserOut.model_validate(user)
+
+
+@router.patch("/me/webhook", response_model=UserOut)
+async def update_webhook_url(
+    body: WebhookUrlIn,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> UserOut:
+    """Set or clear the caller's own webhook URL.
+
+    Cadence will POST a small JSON notification here whenever one of this user's own requests
+    is approved or fulfilled (never for rejected/failed). Generic webhook URL only for now --
+    per-service integrations (Telegram, Discord, ntfy, etc.) are a deliberate non-goal here.
+    """
+    user = await set_webhook_url(session, user, body.webhook_url)
+    logger.info(
+        "webhook_url_updated", user_id=user.id, cleared=body.webhook_url is None
+    )
     return UserOut.model_validate(user)

@@ -94,6 +94,50 @@ class TestAppleSearchSource:
         assert result.results == []
 
 
+class TestAppleSearchSourceFetchById:
+    @pytest.mark.asyncio
+    async def test_fetch_by_id_normalizes_happy_path(self, httpx_mock):
+        httpx_mock.add_response(
+            url=httpx.URL(
+                "https://itunes.apple.com/lookup",
+                params={"id": "643421652", "entity": "song"},
+            ),
+            json={
+                "results": [
+                    {
+                        "trackId": 643421652,
+                        "trackName": "Tum Hi Ho",
+                        "artistName": "Arijit Singh",
+                        "collectionName": "Aashiqui 2",
+                        "trackTimeMillis": 262000,
+                        "artworkUrl100": "https://example.test/100x100bb.jpg",
+                        "releaseDate": "2013-04-26T00:00:00Z",
+                    }
+                ]
+            },
+        )
+        track = await AppleSearchSource().fetch_by_id("643421652")
+        assert track is not None
+        assert track.source == "apple"
+        assert track.source_id == "643421652"
+        assert track.title == "Tum Hi Ho"
+        assert "512x512bb" in track.artwork_url
+
+    @pytest.mark.asyncio
+    async def test_fetch_by_id_returns_none_when_not_found(self, httpx_mock):
+        httpx_mock.add_response(json={"resultCount": 0, "results": []})
+        track = await AppleSearchSource().fetch_by_id("000000000")
+        assert track is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_by_id_raises_safe_http_error_on_http_error(self, httpx_mock):
+        from app.core.safe_http import SafeHttpError
+
+        httpx_mock.add_response(status_code=500)
+        with pytest.raises(SafeHttpError):
+            await AppleSearchSource().fetch_by_id("643421652")
+
+
 class TestMusicBrainzSearchSource:
     @pytest.mark.asyncio
     async def test_normalizes_happy_path(self, httpx_mock):
@@ -183,6 +227,73 @@ class TestSpotifySearchSource:
         source = SpotifySearchSource("bad-id", "bad-secret")
         result = await source.run("test")
         assert result.ok is False
+
+
+class TestSpotifySearchSourceFetchById:
+    @pytest.mark.asyncio
+    async def test_fetch_by_id_returns_none_when_not_configured(self):
+        source = SpotifySearchSource(None, None)
+        track = await source.fetch_by_id("6y0igZArWVi6Iz0rj35c1Y")
+        assert track is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_by_id_normalizes_happy_path(self, httpx_mock):
+        httpx_mock.add_response(
+            url="https://accounts.spotify.com/api/token",
+            json={"access_token": "tok123", "expires_in": 3600},
+        )
+        httpx_mock.add_response(
+            url=httpx.URL(
+                "https://api.spotify.com/v1/tracks",
+                params={"ids": "6y0igZArWVi6Iz0rj35c1Y"},
+            ),
+            json={
+                "tracks": [
+                    {
+                        "id": "6y0igZArWVi6Iz0rj35c1Y",
+                        "name": "Tum Hi Ho",
+                        "artists": [{"name": "Arijit Singh"}],
+                        "album": {
+                            "name": "Aashiqui 2",
+                            "images": [{"url": "https://example.test/art.jpg"}],
+                            "release_date": "2013-04-26",
+                        },
+                        "duration_ms": 262000,
+                    }
+                ]
+            },
+        )
+        source = SpotifySearchSource("client-id", "client-secret")
+        track = await source.fetch_by_id("6y0igZArWVi6Iz0rj35c1Y")
+        assert track is not None
+        assert track.source == "spotify"
+        assert track.source_id == "6y0igZArWVi6Iz0rj35c1Y"
+        assert track.title == "Tum Hi Ho"
+        assert track.artwork_url == "https://example.test/art.jpg"
+
+    @pytest.mark.asyncio
+    async def test_fetch_by_id_returns_none_when_not_found(self, httpx_mock):
+        httpx_mock.add_response(
+            url="https://accounts.spotify.com/api/token",
+            json={"access_token": "tok123", "expires_in": 3600},
+        )
+        httpx_mock.add_response(json={"tracks": [None]})
+        source = SpotifySearchSource("client-id", "client-secret")
+        track = await source.fetch_by_id("doesnotexist00000000")
+        assert track is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_by_id_raises_safe_http_error_on_http_error(self, httpx_mock):
+        from app.core.safe_http import SafeHttpError
+
+        httpx_mock.add_response(
+            url="https://accounts.spotify.com/api/token",
+            json={"access_token": "tok123", "expires_in": 3600},
+        )
+        httpx_mock.add_response(status_code=500)
+        source = SpotifySearchSource("client-id", "client-secret")
+        with pytest.raises(SafeHttpError):
+            await source.fetch_by_id("6y0igZArWVi6Iz0rj35c1Y")
 
 
 class TestProwlarrSearchSource:

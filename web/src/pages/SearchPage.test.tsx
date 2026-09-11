@@ -2,6 +2,28 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchPage } from "./SearchPage";
+import { api, ApiError } from "../api/client";
+import type { TrackResult } from "../types/api";
+
+// Only `search.resolveLink` is mocked; `search.query`/`streamUrl` keep their real
+// implementations since useSearchStream builds its EventSource URL from the real streamUrl().
+vi.mock("../api/client", async () => {
+  const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      search: {
+        ...actual.api.search,
+        resolveLink: vi.fn(),
+      },
+    },
+  };
+});
+
+const mockedApi = api as unknown as {
+  search: { resolveLink: ReturnType<typeof vi.fn> };
+};
 
 /**
  * jsdom does not implement EventSource, so the streaming search is exercised against this
@@ -151,5 +173,97 @@ describe("SearchPage '/' shortcut", () => {
     typeQuery("ac/dc");
 
     expect(searchbox).toHaveValue("ac/dc");
+  });
+});
+
+const resolvedTrack: TrackResult = {
+  source: "spotify",
+  source_id: "6y0igZArWVi6Iz0rj35c1Y",
+  title: "Tum Hi Ho",
+  artist: "Arijit Singh",
+  album: "Aashiqui 2",
+  duration_seconds: 262,
+  artwork_url: null,
+  year: 2013,
+  musicbrainz_recording_id: null,
+  indexer: null,
+  size_bytes: null,
+  seeders: null,
+  download_url: null,
+  guid: null,
+};
+
+describe("SearchPage paste-a-link", () => {
+  beforeEach(() => {
+    mockedApi.search.resolveLink.mockReset();
+  });
+
+  function typeLink(text: string) {
+    fireEvent.change(screen.getByRole("textbox", { name: /paste a spotify or apple music/i }), {
+      target: { value: text },
+    });
+  }
+
+  it("resolves a pasted link and renders it with the existing TrackCard", async () => {
+    mockedApi.search.resolveLink.mockResolvedValue(resolvedTrack);
+    renderSearchPage();
+
+    typeLink("https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y");
+    fireEvent.click(screen.getByRole("button", { name: /resolve link/i }));
+
+    expect(await screen.findByText("Tum Hi Ho")).toBeInTheDocument();
+    expect(screen.getByText("Arijit Singh")).toBeInTheDocument();
+    expect(mockedApi.search.resolveLink).toHaveBeenCalledWith(
+      "https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y",
+    );
+  });
+
+  it("shows the backend's specific error message inline, not a toast or a generic message", async () => {
+    mockedApi.search.resolveLink.mockRejectedValue(
+      new ApiError(
+        422,
+        { detail: "That doesn't look like a Spotify or Apple Music track link" },
+        "That doesn't look like a Spotify or Apple Music track link",
+      ),
+    );
+    renderSearchPage();
+
+    typeLink("https://youtube.com/watch?v=dQw4w9WgXcQ");
+    fireEvent.click(screen.getByRole("button", { name: /resolve link/i }));
+
+    expect(
+      await screen.findByText("That doesn't look like a Spotify or Apple Music track link"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Tum Hi Ho")).not.toBeInTheDocument();
+  });
+
+  it("shows a specific 404 message when the platform is recognized but the track isn't found", async () => {
+    mockedApi.search.resolveLink.mockRejectedValue(
+      new ApiError(
+        404,
+        { detail: "Couldn't find that track on Spotify" },
+        "Couldn't find that track on Spotify",
+      ),
+    );
+    renderSearchPage();
+
+    typeLink("https://open.spotify.com/track/0000000000000000000000");
+    fireEvent.click(screen.getByRole("button", { name: /resolve link/i }));
+
+    expect(await screen.findByText("Couldn't find that track on Spotify")).toBeInTheDocument();
+  });
+
+  it("clears a previous error once a new link is typed", async () => {
+    mockedApi.search.resolveLink.mockRejectedValue(
+      new ApiError(422, { detail: "Bad link" }, "Bad link"),
+    );
+    renderSearchPage();
+
+    typeLink("https://example.com/not-a-track");
+    fireEvent.click(screen.getByRole("button", { name: /resolve link/i }));
+    expect(await screen.findByText("Bad link")).toBeInTheDocument();
+
+    typeLink("https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y");
+    expect(screen.queryByText("Bad link")).not.toBeInTheDocument();
   });
 });
