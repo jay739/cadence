@@ -7,6 +7,7 @@ import type {
   RequestDetail,
   PreferredFormat,
   RequestRecord,
+  RequestStatusCounts,
   SearchSourceName,
   SettingsIntegrationName,
   SettingsSourcePreference,
@@ -154,6 +155,27 @@ export const api = {
   },
   health: {
     get: () => request<HealthResponse>("/api/health"),
+  },
+  users: {
+    stats: () => request<RequestStatusCounts>("/api/users/me/stats"),
+    updateAvatar: (avatarUrl: string | null) =>
+      request<User>("/api/users/me/avatar", {
+        method: "PATCH",
+        body: JSON.stringify({ avatar_url: avatarUrl }),
+      }),
+    updateEmail: (email: string) =>
+      request<User>("/api/users/me/email", {
+        method: "PATCH",
+        body: JSON.stringify({ email }),
+      }),
+    changePassword: (currentPassword: string, newPassword: string) =>
+      request<AuthResponse>("/api/users/me/password", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      }),
   },
   adminSettings: {
     get: () => request<IntegrationSettings>("/api/admin/settings"),

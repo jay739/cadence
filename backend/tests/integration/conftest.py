@@ -112,3 +112,42 @@ async def make_admin_headers(client: AsyncClient) -> dict:
     )
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+async def make_navidrome_headers(
+    client: AsyncClient, *, email: str = "navtest@navidrome.local"
+) -> dict:
+    """Insert a Navidrome-backed user directly and issue it a valid session token.
+
+    Bypasses the real login flow (which would need a live Navidrome server to answer
+    ping.view/getUser.view) since what these tests care about is route behavior for this
+    provider, not the login handshake itself (covered separately in
+    tests/integration/test_navidrome_login.py).
+    """
+    from app.core.security import create_session_token
+    from app.models.user import AuthProvider, User
+
+    settings = get_settings()
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        user = User(
+            email=email,
+            password_hash=None,
+            auth_provider=AuthProvider.NAVIDROME,
+            external_username=email.split("@")[0],
+            role=UserRole.USER,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+        token_version = user.token_version
+
+    token = create_session_token(
+        user_id=user_id,
+        role=UserRole.USER.value,
+        token_version=token_version,
+        secret=settings.resolved_session_secret(),
+        ttl_minutes=settings.session_ttl_minutes,
+    )
+    return {"Authorization": f"Bearer {token}"}

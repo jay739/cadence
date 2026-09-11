@@ -7,6 +7,7 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { SearchPage } from "./pages/SearchPage";
 import { MyRequestsPage } from "./pages/MyRequestsPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
+import { ProfilePage } from "./pages/ProfilePage";
 
 // Code-split: only an admin ever navigates here, so their JS should not ship in the bundle
 // every regular listener downloads and parses on first load.
@@ -32,6 +33,7 @@ function App() {
         <Route path="/search" element={<SearchPage />} />
         <Route path="/requests" element={<MyRequestsPage />} />
         <Route path="/requests/:id" element={<RequestDetailPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route
           path="/admin"
           element={

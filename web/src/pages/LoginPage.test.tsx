@@ -58,6 +58,8 @@ describe("LoginPage", () => {
       login,
       register: vi.fn(),
       logout: vi.fn(),
+      setUser: vi.fn(),
+      applySession: vi.fn(),
     });
   });
 
