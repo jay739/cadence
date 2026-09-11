@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.models.request import RequestStatus
 from tests.integration.conftest import make_admin_headers, register_and_login
 
 pytestmark = pytest.mark.asyncio
@@ -253,6 +254,138 @@ class TestAdminApprovalQueue:
             "/api/requests/does-not-exist/approve",
             json={"note": "x"},
             headers=admin_headers,
+        )
+        assert resp.status_code == 404
+
+
+class TestRetryRequest:
+    async def _force_status(self, request_id: str, new_status) -> None:
+        """Set a request's status directly via the DB, the same way make_admin_headers
+        promotes a user directly rather than through the API.
+
+        Deliberately not "approve, then wait for the real background worker to fail it":
+        FulfillmentWorker.start() schedules its loop via asyncio.create_task() during the
+        app's lifespan, which this test harness runs on a DIFFERENT event loop instance than
+        the one the test body itself executes on (confirmed directly: the worker's own task
+        object reports a different get_loop() than asyncio.get_running_loop() inside the
+        test). The task exists and is not broken, it is simply never scheduled by the loop
+        the test is actually waiting on, so nothing here can rely on it running within a
+        test's lifetime. Every other test in this file (and test_fulfillment.py generally)
+        already avoids this by calling fulfill_request directly or, as here, going straight
+        to the DB; this is not a new pattern, just applied to a third status.
+        """
+        from sqlalchemy import select
+
+        from app.db.base import get_sessionmaker
+        from app.models.request import Request
+
+        sessionmaker = get_sessionmaker()
+        async with sessionmaker() as session:
+            result = await session.execute(
+                select(Request).where(Request.id == request_id)
+            )
+            row = result.scalar_one()
+            row.status = new_status
+            await session.commit()
+
+    async def test_retry_requires_auth(self, app_client):
+        resp = await app_client.post("/api/requests/does-not-exist/retry")
+        assert resp.status_code == 401
+
+    async def test_owner_can_retry_their_own_failed_request(self, app_client):
+        user_headers = await register_and_login(
+            app_client, "retryowner@example.com", "a-strong-password-1"
+        )
+        created = await app_client.post(
+            "/api/requests", json=_payload(), headers=user_headers
+        )
+        request_id = created.json()["id"]
+        await self._force_status(request_id, RequestStatus.FAILED)
+
+        resp = await app_client.post(
+            f"/api/requests/{request_id}/retry", headers=user_headers
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "approved"
+        assert resp.json()["failure_reason"] is None
+
+    async def test_admin_can_retry_someone_elses_failed_request(self, app_client):
+        user_headers = await register_and_login(
+            app_client, "retryowner2@example.com", "a-strong-password-1"
+        )
+        admin_headers = await make_admin_headers(app_client)
+        created = await app_client.post(
+            "/api/requests", json=_payload(), headers=user_headers
+        )
+        request_id = created.json()["id"]
+        await self._force_status(request_id, RequestStatus.FAILED)
+
+        resp = await app_client.post(
+            f"/api/requests/{request_id}/retry", headers=admin_headers
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "approved"
+
+    async def test_a_different_user_cannot_retry_someone_elses_request(
+        self, app_client
+    ):
+        owner_headers = await register_and_login(
+            app_client, "retryowner3@example.com", "a-strong-password-1"
+        )
+        stranger_headers = await register_and_login(
+            app_client, "retrystranger@example.com", "a-strong-password-1"
+        )
+        created = await app_client.post(
+            "/api/requests", json=_payload(), headers=owner_headers
+        )
+        request_id = created.json()["id"]
+        await self._force_status(request_id, RequestStatus.FAILED)
+
+        resp = await app_client.post(
+            f"/api/requests/{request_id}/retry", headers=stranger_headers
+        )
+        # 404, not 403: matches get_request_detail's existing behavior of never confirming
+        # another user's request even exists.
+        assert resp.status_code == 404
+
+    async def test_retrying_a_pending_request_is_rejected(self, app_client):
+        user_headers = await register_and_login(
+            app_client, "retrypending@example.com", "a-strong-password-1"
+        )
+        created = await app_client.post(
+            "/api/requests", json=_payload(), headers=user_headers
+        )
+        request_id = created.json()["id"]
+
+        resp = await app_client.post(
+            f"/api/requests/{request_id}/retry", headers=user_headers
+        )
+        assert resp.status_code == 409
+
+    async def test_retrying_a_fulfilled_request_is_rejected(self, app_client):
+        # A retry endpoint that could be called on an already-fulfilled request risks
+        # re-downloading and re-filing a track that is already sitting correctly in the
+        # library; the state guard exists specifically to make that impossible.
+        user_headers = await register_and_login(
+            app_client, "retryfulfilled@example.com", "a-strong-password-1"
+        )
+        created = await app_client.post(
+            "/api/requests", json=_payload(), headers=user_headers
+        )
+        request_id = created.json()["id"]
+        await self._force_status(request_id, RequestStatus.FULFILLED)
+
+        resp = await app_client.post(
+            f"/api/requests/{request_id}/retry", headers=user_headers
+        )
+        assert resp.status_code == 409
+
+    async def test_retrying_nonexistent_request_404s(self, app_client):
+        headers = await register_and_login(
+            app_client, "retrynonexistent@example.com", "a-strong-password-1"
+        )
+        resp = await app_client.post(
+            "/api/requests/does-not-exist/retry", headers=headers
         )
         assert resp.status_code == 404
 

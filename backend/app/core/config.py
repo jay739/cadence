@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     fulfillment_download_timeout_seconds: int = Field(
         default=900, alias="FULFILLMENT_DOWNLOAD_TIMEOUT_SECONDS"
     )
+    # A candidate can score well and still fail for a reason scoring cannot see (a torrent
+    # stuck at zero peers, a Soulseek user gone offline, a YouTube video pulled between being
+    # indexed and being fetched). Each tier falls through to the next-best qualifying
+    # candidate, up to this many tries, before giving up on that tier entirely.
+    fulfillment_max_candidate_attempts: int = Field(
+        default=3, alias="FULFILLMENT_MAX_CANDIDATE_ATTEMPTS"
+    )
 
     # --- Settings source override (break-glass, issue #18) ---
     # An admin can flip individual integrations to "database wins" in the settings UI (see

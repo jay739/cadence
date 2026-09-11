@@ -171,6 +171,60 @@ class TestProwlarrOnly:
     ):
         session, user = fulfillment_db
         request_row = await _make_request(session, user)
+        # qBittorrent has to be configured for a grab to even be attempted: a grab that can
+        # never be confirmed complete is pointless, so fulfillment now checks this first
+        # rather than grabbing blindly (see the SKIPPED_NOT_CONFIGURED test below).
+        settings = _settings(
+            tmp_path,
+            PROWLARR_URL="http://localhost:9696",
+            PROWLARR_API_KEY="key123",
+            QBITTORRENT_URL="http://localhost:8080",
+            QBITTORRENT_USERNAME="admin",
+            QBITTORRENT_PASSWORD="adminpass",
+        )
+
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:9696/api/v1/search\?.*"),
+            method="GET",
+            json=[
+                {
+                    "guid": "guid-1",
+                    "title": "Arijit Singh - Tum Hi Ho",
+                    "indexerId": 1,
+                    "indexer": "TestIndexer",
+                    "size": 1000,
+                }
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/auth/login",
+            text="Ok.",
+            headers={"Set-Cookie": "SID=abc123; Path=/"},
+        )
+        # The pre-grab existing-torrent check: nothing present yet, so fulfillment proceeds
+        # to actually attempt the grab, which is what this test needs to reach.
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info", json=[]
+        )
+        httpx_mock.add_response(
+            url="http://localhost:9696/api/v1/search", method="POST", status_code=500
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        attempts = await _attempts_of(session, request_row.id)
+        prowlarr_attempts = [a for a in attempts if a.backend == "prowlarr"]
+        assert any(
+            a.outcome == FulfillmentOutcome.ERROR.value for a in prowlarr_attempts
+        )
+
+    async def test_prowlarr_configured_but_qbittorrent_not_skips_grab_entirely(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        # A grab neither Cadence nor the operator could ever confirm complete is worse than
+        # not grabbing at all: it silently leaves a torrent behind that nothing tracks.
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
         settings = _settings(
             tmp_path, PROWLARR_URL="http://localhost:9696", PROWLARR_API_KEY="key123"
         )
@@ -188,16 +242,14 @@ class TestProwlarrOnly:
                 }
             ],
         )
-        httpx_mock.add_response(
-            url="http://localhost:9696/api/v1/search", method="POST", status_code=500
-        )
 
         await fulfill_request(session, request_row, settings)
 
         attempts = await _attempts_of(session, request_row.id)
         prowlarr_attempts = [a for a in attempts if a.backend == "prowlarr"]
-        assert any(
-            a.outcome == FulfillmentOutcome.ERROR.value for a in prowlarr_attempts
+        assert (
+            prowlarr_attempts[-1].outcome
+            == FulfillmentOutcome.SKIPPED_NOT_CONFIGURED.value
         )
 
 
@@ -236,7 +288,8 @@ class TestProwlarrSucceedsViaQbittorrent:
             url="http://localhost:9696/api/v1/search", method="POST", json={}
         )
 
-        # qBittorrent: login, find torrent by hint, confirm complete, list files.
+        # qBittorrent: login, pre-grab existing-torrent check (nothing yet), grab, then
+        # find-by-hint again to confirm what was just grabbed, confirm complete, list files.
         httpx_mock.add_response(
             url="http://localhost:8080/api/v2/auth/login",
             text="Ok.",
@@ -245,6 +298,9 @@ class TestProwlarrSucceedsViaQbittorrent:
         content_dir = data_dir / "staging"
         content_dir.mkdir(parents=True, exist_ok=True)
         (content_dir / "Tum Hi Ho.flac").write_bytes(b"fLaC" + b"\x00" * 40)
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info", json=[]
+        )
         httpx_mock.add_response(
             url="http://localhost:8080/api/v2/torrents/info",
             json=[
@@ -598,6 +654,367 @@ class TestFallsBackToYtdlp:
         assert [a.backend for a in attempts] == ["prowlarr", "slskd", "ytdlp"]
 
 
+class TestFallsThroughToNextCandidateWithinATier:
+    """A candidate can score well and still fail for a reason scoring cannot see, in
+    production this was exactly a YouTube video pulled between being indexed and fetched. Each
+    tier must try the next-best qualifying candidate rather than give up on the whole tier.
+    """
+
+    async def test_ytdlp_first_candidate_unavailable_second_succeeds(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+        library_dir = tmp_path / "library"
+        data_dir = tmp_path / "data"
+        # Prowlarr and slskd deliberately unconfigured: neither should make an HTTP call at
+        # all, so no mock for either is registered here.
+        settings = _settings(tmp_path, YTDLP_SHIM_URL="http://localhost:8090")
+
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[
+                {"video_id": "aaaaaaaaaaa", "title": "Arijit Singh - Tum Hi Ho"},
+                {"video_id": "bbbbbbbbbbb", "title": "Arijit Singh Tum Hi Ho"},
+            ],
+        )
+        # First candidate: the shim itself reports the download failed (mirrors the real
+        # "This video is not available" case), never even leaves "running" via a job id.
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads",
+            method="POST",
+            status_code=202,
+            json={"job_id": "job-1", "state": "running"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads/job-1",
+            method="GET",
+            json={"job_id": "job-1", "state": "failed", "error": "video not available"},
+        )
+        # Second candidate: succeeds.
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads",
+            method="POST",
+            status_code=202,
+            json={"job_id": "job-2", "state": "running"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads/job-2",
+            method="GET",
+            json={
+                "job_id": "job-2",
+                "state": "completed",
+                "filename": "bbbbbbbbbbb.opus",
+            },
+        )
+
+        staging_dir = data_dir / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "bbbbbbbbbbb.opus").write_bytes(b"OggS" + b"\x00" * 40)
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+        final_path = library_dir / request_row.final_file_path
+        assert final_path.exists()
+
+        attempts = await _attempts_of(session, request_row.id)
+        ytdlp_attempts = [a for a in attempts if a.backend == "ytdlp"]
+        failed = [
+            a
+            for a in ytdlp_attempts
+            if a.outcome == FulfillmentOutcome.DOWNLOAD_FAILED.value
+        ]
+        assert len(failed) == 1
+        assert "video not available" in failed[0].detail
+        assert any(
+            a.outcome == FulfillmentOutcome.DOWNLOAD_COMPLETED.value
+            for a in ytdlp_attempts
+        )
+
+    async def test_slskd_first_candidate_never_completes_second_succeeds(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+        library_dir = tmp_path / "library"
+        data_dir = tmp_path / "data"
+        # poll_interval=0 means asyncio.sleep(0), a yield with no real delay, so the loop
+        # checks rapidly and genuinely runs its check more than once (the whole point of this
+        # test) inside a still-short 1-second real deadline, rather than a zero timeout that
+        # would skip checking at all.
+        settings = _settings(
+            tmp_path,
+            SLSKD_URL="http://localhost:5030",
+            SLSKD_API_KEY="slskdkey",
+            FULFILLMENT_POLL_INTERVAL_SECONDS=0,
+            FULFILLMENT_DOWNLOAD_TIMEOUT_SECONDS=1,
+        )
+        # Prowlarr deliberately unconfigured: it makes no HTTP call at all, so no mock for it
+        # is registered here.
+
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches",
+            method="POST",
+            json={"id": "s1"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1",
+            method="GET",
+            json={"isComplete": True},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1/responses",
+            method="GET",
+            json=[
+                {
+                    "username": "userA",
+                    "files": [{"filename": "Tum Hi Ho v1.flac", "size": 1000}],
+                },
+                {
+                    "username": "userB",
+                    "files": [{"filename": "Tum Hi Ho v2.flac", "size": 1000}],
+                },
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/transfers/downloads/userA",
+            method="POST",
+            json={},
+        )
+        # userA's transfer never reports complete. Reusable: the short but nonzero timeout
+        # above means the poll loop genuinely checks this more than once before giving up,
+        # and only the first registration of an otherwise-identical response gets reused by
+        # default.
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/transfers/downloads/userA",
+            method="GET",
+            json={
+                "directories": [
+                    {
+                        "files": [
+                            {"filename": "Tum Hi Ho v1.flac", "state": "InProgress"}
+                        ]
+                    }
+                ]
+            },
+            is_reusable=True,
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/transfers/downloads/userB",
+            method="POST",
+            json={},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/transfers/downloads/userB",
+            method="GET",
+            json={
+                "directories": [
+                    {
+                        "files": [
+                            {
+                                "filename": "Tum Hi Ho v2.flac",
+                                "state": "Completed, Succeeded",
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+
+        staging_dir = data_dir / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "Tum Hi Ho v2.flac").write_bytes(b"fLaC" + b"\x00" * 40)
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+        assert (library_dir / request_row.final_file_path).exists()
+
+        attempts = await _attempts_of(session, request_row.id)
+        slskd_attempts = [a for a in attempts if a.backend == "slskd"]
+        assert any(
+            a.outcome == FulfillmentOutcome.DOWNLOAD_FAILED.value
+            for a in slskd_attempts
+        )
+        assert any(
+            a.outcome == FulfillmentOutcome.DOWNLOAD_COMPLETED.value
+            for a in slskd_attempts
+        )
+
+    async def test_prowlarr_first_candidate_grab_fails_second_succeeds(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+        library_dir = tmp_path / "library"
+        data_dir = tmp_path / "data"
+        settings = _settings(
+            tmp_path,
+            PROWLARR_URL="http://localhost:9696",
+            PROWLARR_API_KEY="key123",
+            QBITTORRENT_URL="http://localhost:8080",
+            QBITTORRENT_USERNAME="admin",
+            QBITTORRENT_PASSWORD="adminpass",
+        )
+
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:9696/api/v1/search\?.*"),
+            method="GET",
+            json=[
+                {
+                    "guid": "guid-1",
+                    "title": "Arijit Singh - Tum Hi Ho v1",
+                    "indexerId": 1,
+                    "indexer": "TestIndexer",
+                    "size": 1000,
+                },
+                {
+                    "guid": "guid-2",
+                    "title": "Arijit Singh - Tum Hi Ho v2",
+                    "indexerId": 1,
+                    "indexer": "TestIndexer",
+                    "size": 1000,
+                },
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/auth/login",
+            text="Ok.",
+            headers={"Set-Cookie": "SID=abc123; Path=/"},
+        )
+        # Candidate 1: no existing torrent, grab call itself fails.
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info", json=[]
+        )
+        httpx_mock.add_response(
+            url="http://localhost:9696/api/v1/search", method="POST", status_code=500
+        )
+        # Candidate 2: no existing torrent, grab succeeds, completes.
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info", json=[]
+        )
+        httpx_mock.add_response(
+            url="http://localhost:9696/api/v1/search", method="POST", json={}
+        )
+        content_dir = data_dir / "staging"
+        content_dir.mkdir(parents=True, exist_ok=True)
+        (content_dir / "Tum Hi Ho v2.flac").write_bytes(b"fLaC" + b"\x00" * 40)
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info",
+            json=[
+                {
+                    "name": "Arijit Singh - Tum Hi Ho v2",
+                    "hash": "hash2",
+                    "save_path": str(content_dir),
+                }
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info?hashes=hash2",
+            json=[{"progress": 1.0}],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/files?hash=hash2",
+            json=[{"name": "Tum Hi Ho v2.flac", "size": 1000}],
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+        assert (library_dir / request_row.final_file_path).exists()
+
+        attempts = await _attempts_of(session, request_row.id)
+        prowlarr_attempts = [a for a in attempts if a.backend == "prowlarr"]
+        assert any(
+            a.outcome == FulfillmentOutcome.ERROR.value for a in prowlarr_attempts
+        )
+        assert any(
+            a.outcome == FulfillmentOutcome.DOWNLOAD_COMPLETED.value
+            for a in prowlarr_attempts
+        )
+
+    async def test_prowlarr_adopts_a_torrent_already_present_instead_of_regrabbing(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        """The literal scenario in issue #13: a prior attempt already handed this exact
+        release to qBittorrent (still sitting there, e.g. in metaDL), and a retry must resume
+        it rather than call grab again, which fails because qBittorrent already has it.
+        """
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+        library_dir = tmp_path / "library"
+        data_dir = tmp_path / "data"
+        settings = _settings(
+            tmp_path,
+            PROWLARR_URL="http://localhost:9696",
+            PROWLARR_API_KEY="key123",
+            QBITTORRENT_URL="http://localhost:8080",
+            QBITTORRENT_USERNAME="admin",
+            QBITTORRENT_PASSWORD="adminpass",
+        )
+
+        release_name = "Arijit Singh - Tum Hi Ho [FLAC]"
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:9696/api/v1/search\?.*"),
+            method="GET",
+            json=[
+                {
+                    "guid": "guid-1",
+                    "title": release_name,
+                    "indexerId": 1,
+                    "indexer": "TestIndexer",
+                    "size": 1000,
+                }
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/auth/login",
+            text="Ok.",
+            headers={"Set-Cookie": "SID=abc123; Path=/"},
+        )
+        content_dir = data_dir / "staging"
+        content_dir.mkdir(parents=True, exist_ok=True)
+        (content_dir / "Tum Hi Ho.flac").write_bytes(b"fLaC" + b"\x00" * 40)
+        # The pre-grab check finds it already present. No POST to Prowlarr's search/grab
+        # endpoint is registered at all: if the code called grab() here, the test would fail
+        # on an unmocked request rather than on an assertion, which is the point.
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info",
+            json=[
+                {
+                    "name": release_name,
+                    "hash": "existinghash",
+                    "save_path": str(content_dir),
+                }
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info?hashes=existinghash",
+            json=[{"progress": 1.0}],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/files?hash=existinghash",
+            json=[{"name": "Tum Hi Ho.flac", "size": 1000}],
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+        assert (library_dir / request_row.final_file_path).exists()
+
+        attempts = await _attempts_of(session, request_row.id)
+        prowlarr_attempts = [a for a in attempts if a.backend == "prowlarr"]
+        grabbed = [
+            a
+            for a in prowlarr_attempts
+            if a.outcome == FulfillmentOutcome.GRABBED.value
+        ]
+        assert len(grabbed) == 1
+        assert "prior attempt" in grabbed[0].detail
+
+
 class TestCrashRecoveryReEvaluation:
     async def test_already_fulfilled_request_is_not_reprocessed(
         self, fulfillment_db, tmp_path
@@ -665,3 +1082,92 @@ class TestFulfillmentUsesDbSavedSettings:
             prowlarr_attempts[0].outcome
             == FulfillmentOutcome.SEARCHED_NO_CANDIDATES.value
         )
+
+
+class TestWebhookFiresOnFulfilled:
+    """The FULFILLED transition happens inside _finalize_file, reached identically from all
+    three tiers (prowlarr/slskd/ytdlp) -- exercising it via the ytdlp tier here keeps the
+    per-test HTTP mocking small since prowlarr/slskd are simply left unconfigured (skipped
+    with no network calls at all, per their own `if not X.configured` short-circuit)."""
+
+    async def test_webhook_fires_with_fulfilled_status_on_success(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        user.webhook_url = "https://example.com/cadence-hook"
+        await session.commit()
+
+        request_row = await _make_request(session, user)
+        data_dir = tmp_path / "data"
+        settings = _settings(tmp_path, YTDLP_SHIM_URL="http://localhost:8090")
+
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[
+                {
+                    "video_id": "dQw4w9WgXcQ",
+                    "title": "Arijit Singh - Tum Hi Ho",
+                    "uploader": "Arijit Singh Official",
+                    "duration_seconds": 259,
+                }
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads",
+            method="POST",
+            status_code=202,
+            json={"job_id": "job-1", "state": "running"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads/job-1",
+            method="GET",
+            json={
+                "job_id": "job-1",
+                "state": "completed",
+                "filename": "dQw4w9WgXcQ.opus",
+                "error": None,
+            },
+        )
+        httpx_mock.add_response(
+            url="https://example.com/cadence-hook", method="POST", json={"ok": True}
+        )
+
+        staging_dir = data_dir / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "dQw4w9WgXcQ.opus").write_bytes(b"OggS" + b"\x00" * 40)
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+
+        import json
+
+        webhook_calls = [
+            r
+            for r in httpx_mock.get_requests()
+            if str(r.url) == "https://example.com/cadence-hook"
+        ]
+        assert len(webhook_calls) == 1
+        body = json.loads(webhook_calls[0].content)
+        assert body["event"] == "fulfilled"
+        assert body["status"] == "fulfilled"
+        assert body["request_id"] == request_row.id
+
+    async def test_no_webhook_call_when_fulfillment_fails(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        user.webhook_url = "https://example.com/cadence-hook"
+        await session.commit()
+
+        request_row = await _make_request(session, user)
+        settings = _settings(tmp_path)
+
+        # No backends configured at all: every tier is skipped, request ends FAILED. No
+        # response is registered for the webhook URL, so if it were called anyway (it must
+        # not be, since FAILED never fires a webhook), the unmatched request would fail loudly.
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FAILED
+        assert httpx_mock.get_requests() == []
