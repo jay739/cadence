@@ -50,12 +50,28 @@ class LibrarySettingsOut(BaseModel):
     library_path_pattern: FieldValue
 
 
+class SourcePreferenceOut(BaseModel):
+    """Which source this integration is set to prefer, and whether that choice is currently
+    overridden by the break-glass env var (see Settings.settings_force_env_precedence).
+    """
+
+    preference: str = Field(description='"env" | "database"')
+    forced_env: bool = Field(
+        description="True when SETTINGS_FORCE_ENV_PRECEDENCE is overriding `preference`"
+    )
+
+
+class SourcePreferenceIn(BaseModel):
+    preference: str = Field(description='"env" | "database"')
+
+
 class IntegrationSettingsOut(BaseModel):
     prowlarr: ProwlarrSettingsOut
     qbittorrent: QBittorrentSettingsOut
     slskd: SlskdSettingsOut
     spotify: SpotifySettingsOut
     library: LibrarySettingsOut
+    source_preferences: dict[str, SourcePreferenceOut]
 
 
 # --- Update payloads: partial per-integration, per the mission's "full or partial payload". ---

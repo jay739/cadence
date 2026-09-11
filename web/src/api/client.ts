@@ -9,6 +9,7 @@ import type {
   RequestRecord,
   SearchSourceName,
   SettingsIntegrationName,
+  SettingsSourcePreference,
   SpotifyConnectionStatus,
   SpotifyPlaylistsResponse,
   TestConnectionResult,
@@ -152,6 +153,14 @@ export const api = {
       request<TestConnectionResult>(`/api/admin/settings/${integration}/test`, {
         method: "POST",
         body: JSON.stringify(fields),
+      }),
+    updateSourcePreference: (
+      integration: SettingsIntegrationName,
+      preference: SettingsSourcePreference,
+    ) =>
+      request<IntegrationSettings>(`/api/admin/settings/${integration}/source`, {
+        method: "PUT",
+        body: JSON.stringify({ preference }),
       }),
   },
   spotifyPersonalization: {

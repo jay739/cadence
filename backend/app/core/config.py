@@ -92,6 +92,17 @@ class Settings(BaseSettings):
         default=900, alias="FULFILLMENT_DOWNLOAD_TIMEOUT_SECONDS"
     )
 
+    # --- Settings source override (break-glass, issue #18) ---
+    # An admin can flip individual integrations to "database wins" in the settings UI (see
+    # app.services.settings_store). This is the recovery path if a bad DB-stored value ever
+    # locks Cadence out of an integration it needs: setting this env var forces every
+    # integration back to "env wins" regardless of what's stored, exactly like the behavior
+    # before per-integration preferences existed, without having to fix or delete anything in
+    # the database first.
+    settings_force_env_precedence: bool = Field(
+        default=False, alias="SETTINGS_FORCE_ENV_PRECEDENCE"
+    )
+
     # --- Outbound HTTP behavior ---
     outbound_timeout_seconds: float = Field(
         default=8.0, alias="OUTBOUND_TIMEOUT_SECONDS"
