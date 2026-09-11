@@ -103,6 +103,11 @@ class Settings(BaseSettings):
         default=False, alias="SETTINGS_FORCE_ENV_PRECEDENCE"
     )
 
+    # Keyed by client IP, which is not always one person: behind a reverse proxy that doesn't
+    # forward the real address, or a shared/CGNAT egress, a whole household shares one bucket.
+    # See app.core.limiter.auth_rate_limit.
+    auth_rate_limit: str = Field(default="10/minute", alias="AUTH_RATE_LIMIT")
+
     # --- Outbound HTTP behavior ---
     outbound_timeout_seconds: float = Field(
         default=8.0, alias="OUTBOUND_TIMEOUT_SECONDS"
