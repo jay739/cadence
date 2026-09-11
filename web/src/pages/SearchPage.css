@@ -19,6 +19,30 @@
   border-color: var(--color-accent);
 }
 
+.link-resolve {
+  margin-bottom: var(--space-5);
+}
+
+.link-resolve-form {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.link-resolve-form input {
+  flex: 1;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-line);
+  background: var(--color-bg-inset);
+  color: var(--color-text);
+}
+
+.link-resolve-form input:focus-visible {
+  border-color: var(--color-accent);
+}
+
 .search-tabs {
   display: flex;
   gap: var(--space-2);
