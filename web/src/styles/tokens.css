@@ -109,6 +109,12 @@
   --color-accent-ink: #fff8ea;
 
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 20px rgba(60, 45, 10, 0.12);
+
+  /* Must be repeated here, not only in the media query above: toggling to light while the OS
+     is in dark mode matches this block but not that one, and inheriting the dark glass values
+     onto a light palette leaves panels near-invisible with an edge that disappears. */
+  --glass-bg: color-mix(in srgb, var(--color-bg-raised) 74%, transparent);
+  --glass-border: color-mix(in srgb, #ffffff 80%, transparent);
 }
 
 * {
