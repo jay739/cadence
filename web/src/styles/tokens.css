@@ -50,8 +50,17 @@
   --space-7: 48px;
   --space-8: 64px;
 
-  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.07) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
   --focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent-strong);
+
+  /* Glass surfaces. --glass-bg is deliberately translucent so the ambient wash painted on
+     body::before shows through: on a perfectly flat background, backdrop-filter has nothing
+     to refract and the whole effect reads as a slightly-wrong solid colour instead. The blur
+     radius stays modest because every .card paints its own backdrop layer, and a request list
+     can be dozens of them, where a large radius gets expensive on weaker hardware. */
+  --glass-bg: color-mix(in srgb, var(--color-bg-raised) 62%, transparent);
+  --glass-border: color-mix(in srgb, #ffffff 9%, transparent);
+  --glass-blur: 14px;
 }
 
 /*
@@ -77,6 +86,11 @@
     --color-accent-ink: #fff8ea;
 
     --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 20px rgba(60, 45, 10, 0.12);
+
+    /* Light mode needs a higher opacity and a white-ish edge: the same alpha that reads as
+       frosted over a near-black console reads as washed-out and low-contrast over paper. */
+    --glass-bg: color-mix(in srgb, var(--color-bg-raised) 74%, transparent);
+    --glass-border: color-mix(in srgb, #ffffff 80%, transparent);
   }
 }
 
@@ -95,6 +109,12 @@
   --color-accent-ink: #fff8ea;
 
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 20px rgba(60, 45, 10, 0.12);
+
+  /* Must be repeated here, not only in the media query above: toggling to light while the OS
+     is in dark mode matches this block but not that one, and inheriting the dark glass values
+     onto a light palette leaves panels near-invisible with an edge that disappears. */
+  --glass-bg: color-mix(in srgb, var(--color-bg-raised) 74%, transparent);
+  --glass-border: color-mix(in srgb, #ffffff 80%, transparent);
 }
 
 * {
@@ -116,6 +136,37 @@ body {
   transition:
     background-color 0.25s ease-out,
     color 0.25s ease-out;
+}
+
+/*
+  The ambient console wash the glass panels refract. Fixed rather than scrolling, so panels
+  pick up a different part of it as the page moves under them, which is what sells the effect
+  as depth rather than as flat tinted boxes. Colours are the existing state palette (the amber
+  cue light, the downloading violet, the approved blue) at very low alpha, so this stays the
+  same visual world rather than importing a new one.
+*/
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      58% 44% at 12% 0%,
+      color-mix(in srgb, var(--color-accent) 16%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      48% 38% at 88% 6%,
+      color-mix(in srgb, var(--color-status-downloading) 12%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      70% 46% at 52% 100%,
+      color-mix(in srgb, var(--color-status-approved) 10%, transparent),
+      transparent 74%
+    );
 }
 
 :focus-visible {
