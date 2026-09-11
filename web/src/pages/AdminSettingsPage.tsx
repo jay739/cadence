@@ -5,6 +5,8 @@ import type {
   IntegrationSettings,
   SettingsFieldValue,
   SettingsIntegrationName,
+  SettingsSourcePreference,
+  SourcePreference,
   TestConnectionResult,
 } from "../types/api";
 import "./AdminSettingsPage.css";
@@ -103,6 +105,52 @@ function SourceTag({ source }: { source: SettingsFieldValue["source"] }) {
   return <span className="settings-source settings-source--unset">not set</span>;
 }
 
+function SourcePreferenceToggle({
+  integration,
+  preference,
+}: {
+  integration: SettingsIntegrationName;
+  preference: SourcePreference;
+}) {
+  const queryClient = useQueryClient();
+
+  const setPreference = useMutation({
+    mutationFn: (next: SettingsSourcePreference) =>
+      api.adminSettings.updateSourcePreference(integration, next),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-settings"] }),
+  });
+
+  return (
+    <fieldset className="settings-source-preference" disabled={setPreference.isPending}>
+      <legend>Which source wins</legend>
+      <label>
+        <input
+          type="radio"
+          name={`${integration}-source-preference`}
+          checked={preference.preference === "env"}
+          onChange={() => setPreference.mutate("env")}
+        />
+        Use environment
+      </label>
+      <label>
+        <input
+          type="radio"
+          name={`${integration}-source-preference`}
+          checked={preference.preference === "database"}
+          onChange={() => setPreference.mutate("database")}
+        />
+        Use these settings
+      </label>
+      {preference.forced_env && (
+        <span className="form-note">
+          SETTINGS_FORCE_ENV_PRECEDENCE is set, so every integration currently uses the environment
+          regardless of this choice.
+        </span>
+      )}
+    </fieldset>
+  );
+}
+
 function IntegrationSection({
   spec,
   settings,
@@ -112,6 +160,7 @@ function IntegrationSection({
 }) {
   const queryClient = useQueryClient();
   const currentFields = fieldsOf(settings, spec.key);
+  const sourcePreference = settings.source_preferences[spec.key];
 
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
@@ -186,6 +235,10 @@ function IntegrationSection({
         <h2>{spec.title}</h2>
         <p>{spec.description}</p>
       </div>
+
+      {sourcePreference && (
+        <SourcePreferenceToggle integration={spec.key} preference={sourcePreference} />
+      )}
 
       <div className="settings-fields">
         {spec.fields.map((field) => {

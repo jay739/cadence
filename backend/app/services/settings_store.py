@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.crypto import decrypt_value, encrypt_value, mask_secret
 from app.models.integration_setting import IntegrationSetting
+from app.models.integration_source_preference import IntegrationSourcePreference
 
 # --- Field registry: the exact set the mission scopes this addition to. ---
 # Each entry: field_name -> (integration, env_var_name, is_secret)
@@ -89,17 +90,64 @@ async def _load_db_values(session: AsyncSession, key: bytes) -> dict[str, str | 
     return out
 
 
+async def get_source_preferences(session: AsyncSession) -> dict[str, str]:
+    """Per-integration choice of which source wins: "env" (default) or "database".
+
+    A missing row means "env", which preserves the original hardcoded behavior for every
+    integration that has never touched this feature.
+    """
+    result = await session.execute(select(IntegrationSourcePreference))
+    return {row.integration: row.source for row in result.scalars().all()}
+
+
+async def set_source_preference(
+    session: AsyncSession, *, integration: str, source: str
+) -> None:
+    if integration not in INTEGRATIONS:
+        raise ValueError(f"Unknown integration: {integration!r}")
+    if source not in ("env", "database"):
+        raise ValueError(f"Invalid source preference: {source!r}")
+    result = await session.execute(
+        select(IntegrationSourcePreference).where(
+            IntegrationSourcePreference.integration == integration
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        session.add(IntegrationSourcePreference(integration=integration, source=source))
+    else:
+        row.source = source
+    await session.commit()
+
+
 async def get_effective_settings(
     session: AsyncSession, settings: Settings
 ) -> EffectiveIntegrationSettings:
-    """Resolve every registry field: env var if set, else DB value, else None."""
+    """Resolve every registry field per its integration's source preference.
+
+    Default preference ("env", used whenever no row exists) behaves exactly as before: env var
+    if set, else DB value. An integration explicitly set to "database" ignores its env var
+    entirely and uses the DB value as-is (which may be None: an explicit clear, or simply never
+    saved) even when an env var happens to be present -- otherwise clearing a value while in
+    "database" mode could never actually take effect. `settings.settings_force_env_precedence`
+    is the break-glass override (issue #18): when set, every integration is resolved as "env"
+    regardless of any stored preference, so a bad DB value can never lock an operator out.
+    """
     key = settings.resolved_settings_encryption_key()
     db_values = await _load_db_values(session, key)
+    preferences = (
+        {}
+        if settings.settings_force_env_precedence
+        else await get_source_preferences(session)
+    )
 
     values: dict[str, str | None] = {}
-    for field_name, (_integration, env_var, _is_secret) in FIELD_REGISTRY.items():
+    for field_name, (integration, env_var, _is_secret) in FIELD_REGISTRY.items():
+        prefer_database = preferences.get(integration) == "database"
         env_value = os.environ.get(env_var)
-        if env_value:
+        if prefer_database:
+            values[field_name] = db_values.get(field_name)
+        elif env_value:
             values[field_name] = env_value
         else:
             values[field_name] = db_values.get(field_name)
@@ -183,6 +231,31 @@ async def upsert_setting(
     await session.commit()
 
 
+@dataclass
+class SourcePreferenceInfo:
+    """Which source an integration is set to prefer, and whether that choice is currently
+    overridden by the break-glass env var (`Settings.settings_force_env_precedence`)."""
+
+    preference: str
+    forced_env: bool
+
+
+async def get_source_preference_view(
+    session: AsyncSession, settings: Settings
+) -> dict[str, SourcePreferenceInfo]:
+    """One entry per integration, always reflecting the actual stored preference (even while
+    `forced_env` is overriding its effect, so the UI can keep the saved radio selection
+    visible rather than appearing to silently reset it)."""
+    forced_env = settings.settings_force_env_precedence
+    preferences = await get_source_preferences(session)
+    return {
+        integration: SourcePreferenceInfo(
+            preference=preferences.get(integration, "env"), forced_env=forced_env
+        )
+        for integration in INTEGRATIONS
+    }
+
+
 async def get_masked_settings_view(
     session: AsyncSession, settings: Settings
 ) -> dict[str, dict[str, str | None]]:
@@ -191,8 +264,16 @@ async def get_masked_settings_view(
     Never returns a real secret value once one has been saved (mission requirement). A field
     with no effective value (neither env nor DB) is returned as None so the web client can
     show an empty input rather than a misleading placeholder.
+
+    `<field>__source` is "env" | "db" | "unset", preference-aware: an integration set to
+    "database" never reports "env" for its fields even when the env var happens to be present,
+    since it is deliberately not being used (see `get_source_preference_view` for exposing that
+    choice itself to callers, e.g. the settings UI).
     """
     effective = await get_effective_settings(session, settings)
+    forced_env = settings.settings_force_env_precedence
+    preferences = {} if forced_env else await get_source_preferences(session)
+
     out: dict[str, dict[str, str | None]] = {
         integration: {} for integration in INTEGRATIONS
     }
@@ -202,7 +283,12 @@ async def get_masked_settings_view(
             out[integration][field_name] = mask_secret(raw_value)
         else:
             out[integration][field_name] = raw_value
-        out[integration][f"{field_name}__source"] = (
-            "env" if os.environ.get(env_var) else ("db" if raw_value else "unset")
-        )
+
+        prefer_database = preferences.get(integration) == "database"
+        if prefer_database:
+            out[integration][f"{field_name}__source"] = "db" if raw_value else "unset"
+        else:
+            out[integration][f"{field_name}__source"] = (
+                "env" if os.environ.get(env_var) else ("db" if raw_value else "unset")
+            )
     return out

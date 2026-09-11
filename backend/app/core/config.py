@@ -99,6 +99,17 @@ class Settings(BaseSettings):
         default=3, alias="FULFILLMENT_MAX_CANDIDATE_ATTEMPTS"
     )
 
+    # --- Settings source override (break-glass, issue #18) ---
+    # An admin can flip individual integrations to "database wins" in the settings UI (see
+    # app.services.settings_store). This is the recovery path if a bad DB-stored value ever
+    # locks Cadence out of an integration it needs: setting this env var forces every
+    # integration back to "env wins" regardless of what's stored, exactly like the behavior
+    # before per-integration preferences existed, without having to fix or delete anything in
+    # the database first.
+    settings_force_env_precedence: bool = Field(
+        default=False, alias="SETTINGS_FORCE_ENV_PRECEDENCE"
+    )
+
     # Keyed by client IP, which is not always one person: behind a reverse proxy that doesn't
     # forward the real address, or a shared/CGNAT egress, a whole household shares one bucket.
     # See app.core.limiter.auth_rate_limit.

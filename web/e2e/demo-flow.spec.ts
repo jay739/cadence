@@ -223,6 +223,30 @@ test.describe("Admin integration settings", () => {
       timeout: 15_000,
     });
   });
+
+  test("an admin can flip an integration to prefer these settings over the environment", async ({
+    page,
+  }) => {
+    await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await page.goto("/admin/settings");
+
+    const prowlarrSection = page
+      .locator(".settings-section")
+      .filter({ has: page.getByRole("heading", { name: "Prowlarr", exact: true }) });
+    const useDatabase = prowlarrSection.getByRole("radio", { name: "Use these settings" });
+    await expect(useDatabase).toBeVisible();
+    await useDatabase.click();
+    await expect(useDatabase).toBeChecked();
+
+    // Survives a reload: the choice round-tripped through the backend, not just local state.
+    await page.reload();
+    const prowlarrSectionAfterReload = page
+      .locator(".settings-section")
+      .filter({ has: page.getByRole("heading", { name: "Prowlarr", exact: true }) });
+    await expect(
+      prowlarrSectionAfterReload.getByRole("radio", { name: "Use these settings" }),
+    ).toBeChecked();
+  });
 });
 
 test.describe("Profile page", () => {

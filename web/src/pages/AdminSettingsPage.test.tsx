@@ -16,6 +16,7 @@ vi.mock("../api/client", async () => {
         get: vi.fn(),
         update: vi.fn(),
         testConnection: vi.fn(),
+        updateSourcePreference: vi.fn(),
       },
     },
   };
@@ -47,6 +48,13 @@ function baseSettings(): IntegrationSettings {
         source: "db",
         is_secret: false,
       },
+    },
+    source_preferences: {
+      prowlarr: { preference: "env", forced_env: false },
+      qbittorrent: { preference: "env", forced_env: false },
+      slskd: { preference: "env", forced_env: false },
+      spotify: { preference: "env", forced_env: false },
+      library: { preference: "env", forced_env: false },
     },
   };
 }
@@ -164,5 +172,35 @@ describe("AdminSettingsPage", () => {
     // Only 4 testable integrations (Prowlarr, qBittorrent, slskd, Spotify); Library has none.
     const testButtons = screen.getAllByRole("button", { name: "Test connection" });
     expect(testButtons).toHaveLength(4);
+  });
+
+  it("choosing 'Use these settings' saves the source preference for that integration", async () => {
+    const settings = baseSettings();
+    vi.mocked(api.adminSettings.get).mockResolvedValue(settings);
+    vi.mocked(api.adminSettings.updateSourcePreference).mockResolvedValue(settings);
+    const user = userEvent.setup();
+
+    renderWithQueryClient();
+    await screen.findByText("Prowlarr");
+
+    const databaseRadios = screen.getAllByRole("radio", { name: "Use these settings" });
+    await user.click(databaseRadios[0]);
+
+    await waitFor(() => {
+      expect(api.adminSettings.updateSourcePreference).toHaveBeenCalledWith("prowlarr", "database");
+    });
+  });
+
+  it("shows the break-glass override note and reflects the stored preference despite it", async () => {
+    const settings = baseSettings();
+    settings.source_preferences.prowlarr = { preference: "database", forced_env: true };
+    vi.mocked(api.adminSettings.get).mockResolvedValue(settings);
+
+    renderWithQueryClient();
+    await screen.findByText("Prowlarr");
+
+    expect(screen.getByText(/SETTINGS_FORCE_ENV_PRECEDENCE is set/)).toBeInTheDocument();
+    const databaseRadios = screen.getAllByRole("radio", { name: "Use these settings" });
+    expect(databaseRadios[0]).toBeChecked();
   });
 });

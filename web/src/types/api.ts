@@ -160,12 +160,20 @@ export interface LibrarySettings {
   library_path_pattern: SettingsFieldValue;
 }
 
+export type SettingsSourcePreference = "env" | "database";
+
+export interface SourcePreference {
+  preference: SettingsSourcePreference;
+  forced_env: boolean;
+}
+
 export interface IntegrationSettings {
   prowlarr: ProwlarrSettings;
   qbittorrent: QBittorrentSettings;
   slskd: SlskdSettings;
   spotify: SpotifySettings;
   library: LibrarySettings;
+  source_preferences: Record<SettingsIntegrationName, SourcePreference>;
 }
 
 export type SettingsIntegrationName = "prowlarr" | "qbittorrent" | "slskd" | "spotify" | "library";

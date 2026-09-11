@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_app_settings, get_db, require_admin
@@ -26,13 +27,18 @@ from app.schemas.settings import (
     QBittorrentSettingsOut,
     SlskdSettingsIn,
     SlskdSettingsOut,
+    SourcePreferenceIn,
+    SourcePreferenceOut,
     SpotifySettingsIn,
     SpotifySettingsOut,
     TestConnectionOut,
 )
 from app.services.settings_store import (
     FIELD_REGISTRY,
+    INTEGRATIONS,
     get_masked_settings_view,
+    get_source_preference_view,
+    set_source_preference,
     upsert_setting,
 )
 from app.services.settings_test_connection import (
@@ -63,7 +69,15 @@ async def get_settings_view(
     session: AsyncSession = Depends(get_db),
 ) -> IntegrationSettingsOut:
     masked = await get_masked_settings_view(session, settings)
+    preference_view = await get_source_preference_view(session, settings)
+    source_preferences = {
+        integration: SourcePreferenceOut(
+            preference=info.preference, forced_env=info.forced_env
+        )
+        for integration, info in preference_view.items()
+    }
     return IntegrationSettingsOut(
+        source_preferences=source_preferences,
         prowlarr=ProwlarrSettingsOut(
             prowlarr_url=_field_value(masked, "prowlarr", "prowlarr_url"),
             prowlarr_api_key=_field_value(masked, "prowlarr", "prowlarr_api_key"),
@@ -97,17 +111,26 @@ async def get_settings_view(
 
 
 async def _save_fields(
-    session: AsyncSession, settings: Settings, payload: dict[str, str | None]
+    session: AsyncSession, settings: Settings, body: BaseModel
 ) -> None:
+    """Upsert every field the request body actually included, clearing any sent as null.
+
+    Uses `body.model_fields_set` rather than `body.model_dump()` so an explicitly-sent
+    `{"field": null}` (clear this value) is distinguishable from a field the client simply
+    didn't include (leave it untouched) -- both look identical as plain `None` after
+    `model_dump()`, which is exactly the bug issue #18 flagged: there was previously no way to
+    clear a saved DB value through this API at all.
+    """
     key = settings.resolved_settings_encryption_key()
-    for field_name, value in payload.items():
-        if value is None:
-            continue
+    updated_fields = list(body.model_fields_set)
+    for field_name in updated_fields:
+        value = getattr(body, field_name)
         _integration, _env_var, is_secret = FIELD_REGISTRY[field_name]
         await upsert_setting(
             session, field_name=field_name, value=value, key=key, is_secret=is_secret
         )
-    logger.info("integration_settings_updated", fields=list(payload.keys()))
+    if updated_fields:
+        logger.info("integration_settings_updated", fields=updated_fields)
 
 
 @router.put("/prowlarr", response_model=IntegrationSettingsOut)
@@ -117,7 +140,7 @@ async def update_prowlarr_settings(
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
 ) -> IntegrationSettingsOut:
-    await _save_fields(session, settings, body.model_dump())
+    await _save_fields(session, settings, body)
     return await get_settings_view(_admin=admin, settings=settings, session=session)
 
 
@@ -128,7 +151,7 @@ async def update_qbittorrent_settings(
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
 ) -> IntegrationSettingsOut:
-    await _save_fields(session, settings, body.model_dump())
+    await _save_fields(session, settings, body)
     return await get_settings_view(_admin=admin, settings=settings, session=session)
 
 
@@ -139,7 +162,7 @@ async def update_slskd_settings(
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
 ) -> IntegrationSettingsOut:
-    await _save_fields(session, settings, body.model_dump())
+    await _save_fields(session, settings, body)
     return await get_settings_view(_admin=admin, settings=settings, session=session)
 
 
@@ -150,7 +173,7 @@ async def update_spotify_settings(
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
 ) -> IntegrationSettingsOut:
-    await _save_fields(session, settings, body.model_dump())
+    await _save_fields(session, settings, body)
     return await get_settings_view(_admin=admin, settings=settings, session=session)
 
 
@@ -161,7 +184,41 @@ async def update_library_settings(
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
 ) -> IntegrationSettingsOut:
-    await _save_fields(session, settings, body.model_dump())
+    await _save_fields(session, settings, body)
+    return await get_settings_view(_admin=admin, settings=settings, session=session)
+
+
+@router.put("/{integration}/source", response_model=IntegrationSettingsOut)
+async def update_source_preference(
+    integration: str,
+    body: SourcePreferenceIn,
+    admin: User = Depends(require_admin),
+    settings: Settings = Depends(get_app_settings),
+    session: AsyncSession = Depends(get_db),
+) -> IntegrationSettingsOut:
+    """Set whether `integration` prefers "env" or "database" (issue #18).
+
+    Saving is always allowed, even while `SETTINGS_FORCE_ENV_PRECEDENCE` is currently
+    overriding its effect -- the choice takes effect the moment that break-glass override is
+    lifted, without needing to be re-saved.
+    """
+    if integration not in INTEGRATIONS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Unknown integration"
+        )
+    if body.preference not in ("env", "database"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail='preference must be "env" or "database"',
+        )
+    await set_source_preference(
+        session, integration=integration, source=body.preference
+    )
+    logger.info(
+        "integration_source_preference_updated",
+        integration=integration,
+        preference=body.preference,
+    )
     return await get_settings_view(_admin=admin, settings=settings, session=session)
 
 
