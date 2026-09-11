@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import type { PreferredFormat, SearchSourceName, TrackResult } from "../types/api";
 import { TrackCard } from "../components/TrackCard";
 import { SpotifyPersonalizationPanel } from "../components/SpotifyPersonalizationPanel";
@@ -128,6 +128,82 @@ function SearchResultsPanel({
   );
 }
 
+interface ResolveLinkPanelProps {
+  onRequest: (track: TrackResult, preferredFormat: PreferredFormat) => Promise<void>;
+  requestStates: Record<string, RequestState>;
+}
+
+/**
+ * Lets a user paste a direct Spotify or Apple Music track link and resolve it to one exact
+ * track, as an alternative to the free-text search above for someone who already knows
+ * precisely which recording they want. Only these two platforms are supported today (see
+ * backend/app/services/link_resolve.py for why YouTube links are out of scope).
+ *
+ * Deliberately separate from useSearchStream's per-query state: a resolved link is a single
+ * one-shot lookup, not a stream of per-source results, so a plain useMutation plus local state
+ * covers it without the remount trick the search results panel needs.
+ */
+function ResolveLinkPanel({ onRequest, requestStates }: ResolveLinkPanelProps) {
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [resolvedTrack, setResolvedTrack] = useState<TrackResult | null>(null);
+
+  const resolveLinkMutation = useMutation({
+    mutationFn: (url: string) => api.search.resolveLink(url),
+  });
+
+  async function handleResolveLink(event: FormEvent) {
+    event.preventDefault();
+    const trimmed = linkUrl.trim();
+    if (!trimmed) return;
+    setLinkError(null);
+    try {
+      const track = await resolveLinkMutation.mutateAsync(trimmed);
+      setResolvedTrack(track);
+    } catch (err) {
+      setResolvedTrack(null);
+      setLinkError(
+        err instanceof ApiError ? err.message : "Couldn't resolve that link. Try again.",
+      );
+    }
+  }
+
+  return (
+    <div className="link-resolve">
+      <form className="link-resolve-form" onSubmit={handleResolveLink}>
+        <input
+          type="url"
+          placeholder="…or paste a Spotify or Apple Music track link"
+          aria-label="Paste a Spotify or Apple Music track link"
+          value={linkUrl}
+          onChange={(e) => {
+            setLinkUrl(e.target.value);
+            setLinkError(null);
+          }}
+        />
+        <button
+          type="submit"
+          className="button button--ghost"
+          disabled={!linkUrl.trim() || resolveLinkMutation.isPending}
+        >
+          {resolveLinkMutation.isPending ? "Resolving…" : "Resolve link"}
+        </button>
+      </form>
+      {linkError && <p className="form-error">{linkError}</p>}
+      {resolvedTrack && (
+        <ul className="track-list">
+          <TrackCard
+            key={trackKey(resolvedTrack)}
+            track={resolvedTrack}
+            onRequest={onRequest}
+            requestState={requestStates[trackKey(resolvedTrack)] ?? "idle"}
+          />
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // As-you-type tuning: long enough that a fast typist doesn't fire a stream per keystroke,
 // short enough that results feel immediate once they pause; 2-char minimum keeps one-letter
 // junk queries from fanning out to four real APIs.
@@ -247,6 +323,8 @@ export function SearchPage() {
           Search
         </button>
       </form>
+
+      <ResolveLinkPanel onRequest={handleRequest} requestStates={requestStates} />
 
       <SearchResultsPanel
         key={activeQuery}

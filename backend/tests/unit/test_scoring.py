@@ -6,6 +6,7 @@ from app.services.scoring import (
     extract_extension,
     format_rank,
     matches_preferred_format,
+    qualifying_candidates_ranked,
     rank_candidates,
     title_artist_similarity,
 )
@@ -106,6 +107,28 @@ class TestCandidateRankingAndQualification:
     def test_best_qualifying_candidate_empty_list(self):
         assert best_qualifying_candidate([]) is None
 
+    def test_qualifying_candidates_ranked_excludes_non_qualifying(self):
+        good = self._candidate(0.9)
+        bad = self._candidate(0.1)
+        assert qualifying_candidates_ranked([good, bad]) == [good]
+
+    def test_qualifying_candidates_ranked_orders_best_first(self):
+        low = self._candidate(0.5)
+        high = self._candidate(0.9)
+        mid = self._candidate(0.7)
+        assert qualifying_candidates_ranked([low, high, mid]) == [high, mid, low]
+
+    def test_qualifying_candidates_ranked_empty_when_nothing_qualifies(self):
+        assert qualifying_candidates_ranked([self._candidate(0.1)]) == []
+
+    def test_qualifying_candidates_ranked_first_matches_best_qualifying_candidate(self):
+        # The two functions must agree: a fulfillment tier trying candidate #1 from the
+        # ranked list has to reach for the exact same one best_qualifying_candidate would
+        # have picked, not a different one.
+        candidates = [self._candidate(0.6), self._candidate(0.9), self._candidate(0.75)]
+        ranked = qualifying_candidates_ranked(candidates)
+        assert ranked[0] is best_qualifying_candidate(candidates)
+
 
 class TestFormatPreference:
     def test_any_matches_everything(self):
@@ -120,8 +143,13 @@ class TestFormatPreference:
 
     def test_extensionless_release_title_matches_by_token(self):
         # Prowlarr release titles rarely have an extension but usually carry a format marker.
-        assert matches_preferred_format("Artist - Title (2020) [FLAC] [WEB]", "flac") is True
-        assert matches_preferred_format("Artist - Title (2020) 320 MP3", "flac") is False
+        assert (
+            matches_preferred_format("Artist - Title (2020) [FLAC] [WEB]", "flac")
+            is True
+        )
+        assert (
+            matches_preferred_format("Artist - Title (2020) 320 MP3", "flac") is False
+        )
         assert matches_preferred_format("Artist - Title (2020) 320 MP3", "mp3") is True
 
     def test_preference_reorders_but_never_disqualifies(self):
@@ -208,7 +236,9 @@ class TestEntityUnescaping:
         # Prowlarr hands back HTML-escaped titles, some of them double-escaped. Without
         # unescaping, the stripper leaves literal "amp" tokens behind.
         escaped = title_artist_similarity(
-            "Daft Punk &amp;amp; Pharrell - Get Lucky", "Get Lucky", "Daft Punk & Pharrell"
+            "Daft Punk &amp;amp; Pharrell - Get Lucky",
+            "Get Lucky",
+            "Daft Punk & Pharrell",
         )
         plain = title_artist_similarity(
             "Daft Punk & Pharrell - Get Lucky", "Get Lucky", "Daft Punk & Pharrell"

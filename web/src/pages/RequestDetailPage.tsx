@@ -1,11 +1,12 @@
 import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import "./RequestDetailPage.css";
 
 export function RequestDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["request", id],
@@ -14,6 +15,14 @@ export function RequestDetailPage() {
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       return status === "approved" || status === "downloading" ? 3000 : false;
+    },
+  });
+
+  const retry = useMutation({
+    mutationFn: () => api.requests.retry(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["request", id] });
+      queryClient.invalidateQueries({ queryKey: ["my-requests"] });
     },
   });
 
@@ -34,8 +43,27 @@ export function RequestDetailPage() {
             <h1>{data.title}</h1>
             <p>{data.artist}</p>
           </div>
-          <StatusBadge status={data.status} />
+          <div className="request-detail__status">
+            <StatusBadge status={data.status} />
+            {data.status === "failed" && (
+              <button
+                type="button"
+                className="button button--primary"
+                disabled={retry.isPending}
+                onClick={() => retry.mutate()}
+              >
+                Retry download
+              </button>
+            )}
+          </div>
         </div>
+        {retry.isError && (
+          <p className="form-error">
+            {retry.error instanceof ApiError
+              ? retry.error.message
+              : "Couldn't retry this request. Try again."}
+          </p>
+        )}
 
         <dl className="request-detail__meta">
           {data.album && (

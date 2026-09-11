@@ -3,6 +3,7 @@ import { useAuth } from "../context/useAuth";
 import { BrandMark } from "./BrandMark";
 import { SetupBanner } from "./SetupBanner";
 import { RouteTransition } from "./RouteTransition";
+import { ThemeToggle } from "./ThemeToggle";
 import "./AppShell.css";
 
 export function AppShell() {
@@ -42,6 +43,7 @@ export function AppShell() {
               </button>
             </>
           ) : null}
+          <ThemeToggle />
         </div>
       </header>
       {user?.role === "admin" && <SetupBanner />}

@@ -187,6 +187,32 @@ test.describe("Auth guarding", () => {
   });
 });
 
+test.describe("Theme toggle", () => {
+  // Pinned explicitly: with no stored preference, Cadence follows the OS's prefers-color-scheme
+  // (dark is just the app's own fallback when the OS has no opinion), so leaving this unset
+  // would make the "starts dark" assertion depend on the test runner's own default.
+  test.use({ colorScheme: "dark" });
+
+  test("defaults to dark, switches to light on click, and survives a reload", async ({ page }) => {
+    await login(page, USER_EMAIL, USER_PASSWORD);
+
+    const html = page.locator("html");
+    await expect(html).toHaveAttribute("data-theme", "dark");
+
+    const toggle = page.getByRole("button", { name: "Switch to light mode" });
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+
+    await expect(html).toHaveAttribute("data-theme", "light");
+    await expect(page.getByRole("button", { name: "Switch to dark mode" })).toBeVisible();
+
+    // The pre-paint script in index.html reads localStorage before React mounts, so a
+    // reload must not flash back to dark even briefly.
+    await page.reload();
+    await expect(html).toHaveAttribute("data-theme", "light");
+  });
+});
+
 test.describe("Admin integration settings", () => {
   test("an admin can open the settings page, edit a field, and save it", async ({ page }) => {
     await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
