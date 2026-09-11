@@ -96,7 +96,7 @@ class TestNeitherBackendConfigured:
             for a in attempts
         )
 
-    async def test_audit_trail_records_both_backends_skipped(
+    async def test_audit_trail_records_all_three_backends_skipped(
         self, fulfillment_db, tmp_path
     ):
         session, user = fulfillment_db
@@ -107,7 +107,7 @@ class TestNeitherBackendConfigured:
 
         attempts = await _attempts_of(session, request_row.id)
         backends_tried = {a.backend for a in attempts}
-        assert backends_tried == {"prowlarr", "slskd"}
+        assert backends_tried == {"prowlarr", "slskd", "ytdlp"}
 
 
 class TestProwlarrOnly:
@@ -413,6 +413,189 @@ class TestProwlarrFallsBackToSlskd:
             "Soulseek" in request_row.failure_reason
             or "indexer" in request_row.failure_reason
         )
+
+
+class TestFallsBackToYtdlp:
+    async def test_prowlarr_and_slskd_empty_ytdlp_succeeds_marks_fulfilled(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+        library_dir = tmp_path / "library"
+        data_dir = tmp_path / "data"
+        settings = _settings(
+            tmp_path,
+            PROWLARR_URL="http://localhost:9696",
+            PROWLARR_API_KEY="key123",
+            SLSKD_URL="http://localhost:5030",
+            SLSKD_API_KEY="slskdkey",
+            YTDLP_SHIM_URL="http://localhost:8090",
+        )
+
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:9696/api/v1/search.*"), json=[]
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches",
+            method="POST",
+            json={"id": "s1"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1",
+            method="GET",
+            json={"isComplete": True},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1/responses",
+            method="GET",
+            json=[],
+        )
+
+        # ytdlp-shim lifecycle: search, start a download job, poll until it settles.
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[
+                {
+                    "video_id": "dQw4w9WgXcQ",
+                    "title": "Arijit Singh - Tum Hi Ho",
+                    "uploader": "Arijit Singh Official",
+                    "duration_seconds": 259,
+                }
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads",
+            method="POST",
+            status_code=202,
+            json={"job_id": "job-1", "state": "running"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads/job-1",
+            method="GET",
+            json={
+                "job_id": "job-1",
+                "state": "completed",
+                "filename": "dQw4w9WgXcQ.opus",
+                "error": None,
+            },
+        )
+
+        staging_dir = data_dir / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "dQw4w9WgXcQ.opus").write_bytes(b"OggS" + b"\x00" * 40)
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+        assert request_row.final_file_path
+        final_path = library_dir / request_row.final_file_path
+        assert final_path.exists()
+        # Same as slskd: moves rather than copies, nothing else needs the staging copy.
+        assert not (staging_dir / "dQw4w9WgXcQ.opus").exists()
+
+        attempts = await _attempts_of(session, request_row.id)
+        backends_tried = [a.backend for a in attempts]
+        # Membership, not exact-list equality: each backend that ran logs more than one
+        # attempt row (e.g. DOWNLOAD_STARTED then DOWNLOAD_COMPLETED for ytdlp), matching the
+        # same idiom the slskd success test above uses for the same reason.
+        assert "prowlarr" in backends_tried
+        assert "slskd" in backends_tried
+        assert "ytdlp" in backends_tried
+
+    async def test_ytdlp_reports_no_qualifying_match_marks_failed(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        # yt-dlp returns real results, just not the right song: this must be scored and
+        # rejected through the exact same qualifying-similarity gate as every other tier,
+        # not trusted just because it is the last one tried.
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+        settings = _settings(
+            tmp_path,
+            PROWLARR_URL="http://localhost:9696",
+            PROWLARR_API_KEY="key123",
+            SLSKD_URL="http://localhost:5030",
+            SLSKD_API_KEY="slskdkey",
+            YTDLP_SHIM_URL="http://localhost:8090",
+        )
+
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:9696/api/v1/search.*"), json=[]
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches",
+            method="POST",
+            json={"id": "s1"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1",
+            method="GET",
+            json={"isComplete": True},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1/responses",
+            method="GET",
+            json=[],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[{"video_id": "aaaaaaaaaaa", "title": "Completely Unrelated Video"}],
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FAILED
+        attempts = await _attempts_of(session, request_row.id)
+        ytdlp_attempts = [a for a in attempts if a.backend == "ytdlp"]
+        assert (
+            ytdlp_attempts[0].outcome
+            == FulfillmentOutcome.SEARCHED_NO_QUALIFYING_CANDIDATE.value
+        )
+
+    async def test_all_three_backends_exhausted_marks_failed_with_reason(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+        settings = _settings(
+            tmp_path,
+            PROWLARR_URL="http://localhost:9696",
+            PROWLARR_API_KEY="key123",
+            SLSKD_URL="http://localhost:5030",
+            SLSKD_API_KEY="slskdkey",
+            YTDLP_SHIM_URL="http://localhost:8090",
+        )
+
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:9696/api/v1/search.*"), json=[]
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches",
+            method="POST",
+            json={"id": "s1"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1",
+            method="GET",
+            json={"isComplete": True},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1/responses",
+            method="GET",
+            json=[],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/search", method="POST", json=[]
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FAILED
+        assert "YouTube" in request_row.failure_reason
+        attempts = await _attempts_of(session, request_row.id)
+        assert [a.backend for a in attempts] == ["prowlarr", "slskd", "ytdlp"]
 
 
 class TestCrashRecoveryReEvaluation:

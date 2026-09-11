@@ -54,6 +54,7 @@ async def health(
         # option is even offered. Just a boolean: no host or credential detail, same as
         # every other entry here.
         "navidrome": IntegrationStatus(configured=bool(settings.navidrome_url)),
+        "ytdlp": IntegrationStatus(configured=settings.ytdlp_shim_configured),
     }
 
     if not settings.demo_mode:
@@ -74,6 +75,10 @@ async def health(
             integrations["slskd"].reachable = await _reachable(
                 f"{settings.slskd_url.rstrip('/')}/api/v0/session",
                 headers={"X-API-Key": settings.slskd_api_key},
+            )
+        if settings.ytdlp_shim_configured and settings.ytdlp_shim_url:
+            integrations["ytdlp"].reachable = await _reachable(
+                f"{settings.ytdlp_shim_url.rstrip('/')}/health"
             )
 
     return HealthOut(

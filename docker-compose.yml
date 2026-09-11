@@ -26,6 +26,10 @@ services:
       # SLSKD_URL: "http://slskd:5030"
       # SLSKD_API_KEY: "${SLSKD_API_KEY}"
 
+      # ytdlp-shim (see the ytdlp-shim service below): last-resort YouTube audio fallback,
+      # tried only after Prowlarr and slskd both come up empty.
+      # YTDLP_SHIM_URL: "http://ytdlp-shim:8090"
+
       # Spotify Client Credentials app (app-only search tab)
       # SPOTIFY_CLIENT_ID: "${SPOTIFY_CLIENT_ID}"
       # SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}"
@@ -50,9 +54,41 @@ services:
     # networks:
     #   - media
 
+  # Uncomment to enable the YouTube fallback tier. A separate, isolated service on purpose:
+  # yt-dlp's YouTube extractor breaks on YouTube's own schedule, and process isolation keeps
+  # that from ever touching Cadence's own process (see ytdlp-shim/app/main.py).
+  # ytdlp-shim:
+  #   build: ./ytdlp-shim
+  #   image: ytdlp-shim:local
+  #   container_name: ytdlp-shim
+  #   restart: unless-stopped
+  #   volumes:
+  #     # THE line that matters: this must resolve to the exact same host path as cadence's
+  #     # own cadence-data volume's "staging" subdirectory. Cadence looks for a completed
+  #     # ytdlp-shim download at DATA_DIR/staging/<filename>, so if this volume is not the
+  #     # same underlying location, every completed download reports "file not found" even
+  #     # though the shim finished successfully. Point both at the same host directory rather
+  #     # than two different named volumes, the way the two are separate here by default.
+  #     - ytdlp-downloads:/downloads
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD",
+  #         "python",
+  #         "-c",
+  #         "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3).status == 200 else sys.exit(1)",
+  #       ]
+  #     interval: 30s
+  #     timeout: 5s
+  #     start_period: 15s
+  #     retries: 3
+  #   # networks:
+  #   #   - media
+
 volumes:
   cadence-data:
   cadence-library:
+  # ytdlp-downloads:
 
 # networks:
 #   media:
