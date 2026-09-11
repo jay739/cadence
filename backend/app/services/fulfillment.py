@@ -47,6 +47,7 @@ from app.models.request import (
     Request,
     RequestStatus,
 )
+from app.models.user import User
 from app.search_sources.musicbrainz import lookup_recording
 from app.search_sources.prowlarr import ProwlarrSearchSource
 from app.services.pathsafety import PathSafetyError, render_library_path
@@ -62,6 +63,7 @@ from app.services.scoring import (
 from app.services.settings_store import apply_effective_settings
 from app.services.slskd import SlskdClient
 from app.services.tagging import write_tags
+from app.services.webhook_delivery import notify_webhook
 from app.services.ytdlp_shim import YtdlpShimClient
 
 logger = structlog.get_logger(__name__)
@@ -189,6 +191,12 @@ async def _finalize_file(
         dest.relative_to(settings.music_library_path_resolved)
     )
     await session.commit()
+
+    # Strictly after the commit above, never before or interleaved with it: a webhook
+    # delivery failure must never affect the fulfillment that already succeeded.
+    owner = await session.get(User, request_row.user_id)
+    if owner is not None:
+        await notify_webhook(owner, request_row, "fulfilled")
 
 
 async def _try_prowlarr(

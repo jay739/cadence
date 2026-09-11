@@ -665,3 +665,92 @@ class TestFulfillmentUsesDbSavedSettings:
             prowlarr_attempts[0].outcome
             == FulfillmentOutcome.SEARCHED_NO_CANDIDATES.value
         )
+
+
+class TestWebhookFiresOnFulfilled:
+    """The FULFILLED transition happens inside _finalize_file, reached identically from all
+    three tiers (prowlarr/slskd/ytdlp) -- exercising it via the ytdlp tier here keeps the
+    per-test HTTP mocking small since prowlarr/slskd are simply left unconfigured (skipped
+    with no network calls at all, per their own `if not X.configured` short-circuit)."""
+
+    async def test_webhook_fires_with_fulfilled_status_on_success(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        user.webhook_url = "https://example.com/cadence-hook"
+        await session.commit()
+
+        request_row = await _make_request(session, user)
+        data_dir = tmp_path / "data"
+        settings = _settings(tmp_path, YTDLP_SHIM_URL="http://localhost:8090")
+
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[
+                {
+                    "video_id": "dQw4w9WgXcQ",
+                    "title": "Arijit Singh - Tum Hi Ho",
+                    "uploader": "Arijit Singh Official",
+                    "duration_seconds": 259,
+                }
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads",
+            method="POST",
+            status_code=202,
+            json={"job_id": "job-1", "state": "running"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads/job-1",
+            method="GET",
+            json={
+                "job_id": "job-1",
+                "state": "completed",
+                "filename": "dQw4w9WgXcQ.opus",
+                "error": None,
+            },
+        )
+        httpx_mock.add_response(
+            url="https://example.com/cadence-hook", method="POST", json={"ok": True}
+        )
+
+        staging_dir = data_dir / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "dQw4w9WgXcQ.opus").write_bytes(b"OggS" + b"\x00" * 40)
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+
+        import json
+
+        webhook_calls = [
+            r
+            for r in httpx_mock.get_requests()
+            if str(r.url) == "https://example.com/cadence-hook"
+        ]
+        assert len(webhook_calls) == 1
+        body = json.loads(webhook_calls[0].content)
+        assert body["event"] == "fulfilled"
+        assert body["status"] == "fulfilled"
+        assert body["request_id"] == request_row.id
+
+    async def test_no_webhook_call_when_fulfillment_fails(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        user.webhook_url = "https://example.com/cadence-hook"
+        await session.commit()
+
+        request_row = await _make_request(session, user)
+        settings = _settings(tmp_path)
+
+        # No backends configured at all: every tier is skipped, request ends FAILED. No
+        # response is registered for the webhook URL, so if it were called anyway (it must
+        # not be, since FAILED never fires a webhook), the unmatched request would fail loudly.
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FAILED
+        assert httpx_mock.get_requests() == []
