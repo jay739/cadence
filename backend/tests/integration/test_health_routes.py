@@ -32,9 +32,26 @@ class TestHealth:
             "slskd",
             "spotify",
             "navidrome",
+            "ytdlp",
         }
         for status in integrations.values():
             assert status["configured"] is False
+
+    async def test_ytdlp_configured_when_url_is_set(self, app_client, monkeypatch):
+        monkeypatch.setenv("YTDLP_SHIM_URL", "http://ytdlp-shim.internal:8090")
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+        resp = await app_client.get("/api/health")
+        assert resp.json()["integrations"]["ytdlp"]["configured"] is True
+
+    async def test_ytdlp_never_leaks_its_url(self, app_client, monkeypatch):
+        monkeypatch.setenv("YTDLP_SHIM_URL", "http://internal-ytdlp-shim.example:8090")
+        from app.core.config import get_settings
+
+        get_settings.cache_clear()
+        resp = await app_client.get("/api/health")
+        assert "internal-ytdlp-shim" not in resp.text
 
     async def test_navidrome_configured_when_url_is_set(self, app_client, monkeypatch):
         # The login page reads this pre-auth to decide whether to offer a Navidrome sign-in

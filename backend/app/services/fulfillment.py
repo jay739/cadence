@@ -1,4 +1,4 @@
-"""Fulfillment decision logic: Prowlarr first, Soulseek (slskd) fallback, never more.
+"""Fulfillment decision logic: Prowlarr, then Soulseek (slskd), then YouTube (ytdlp-shim).
 
 For a single approved Request:
   1. Search Prowlarr for the specific track (title + artist + album if known).
@@ -11,13 +11,18 @@ For a single approved Request:
      live without redesigning this function), fall back to Soulseek via slskd: search, score
      candidates the same way (bitrate/format/filename plausibility), download the single best
      file, poll slskd until the transfer completes.
-  4. On completion of either path: file the track into MUSIC_LIBRARY_PATH using the configured
+  4. If slskd also comes up empty, fall back to YouTube via ytdlp-shim: search, score the same
+     way, download the single best match's audio, poll until the job settles. Last resort
+     deliberately: the least reliable source (dependent on yt-dlp's extractor keeping pace with
+     YouTube's own changes) and never authoritative metadata, but the deepest catalog for the
+     regional/long-tail tracks that both other tiers tend to miss entirely.
+  5. On completion of any path: file the track into MUSIC_LIBRARY_PATH using the configured
      pattern (via app.services.pathsafety, which guarantees the result cannot escape the
      library root), tag it (preferring MusicBrainz canonical tags), mark the request fulfilled
      with the final path recorded. The Prowlarr path COPIES, because the source is the file
-     qBittorrent is still seeding and moving it errors the torrent; the slskd path MOVES,
-     because the source is Cadence's own staging dir and leaving it there leaks disk.
-  5. On exhaustion of both paths: mark the request failed with a human-readable reason.
+     qBittorrent is still seeding and moving it errors the torrent; slskd and ytdlp-shim both
+     MOVE, because their source is Cadence's own staging dir and leaving files there leaks disk.
+  6. On exhaustion of every path: mark the request failed with a human-readable reason.
 
 Every step appends a FulfillmentAttempt row: what was searched, what candidates were seen,
 what was picked and why (or why nothing qualified). This is the audit trail required by the
@@ -26,8 +31,10 @@ mission, retrievable per request via GET /api/requests/{id}.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import structlog
@@ -55,6 +62,7 @@ from app.services.scoring import (
 from app.services.settings_store import apply_effective_settings
 from app.services.slskd import SlskdClient
 from app.services.tagging import write_tags
+from app.services.ytdlp_shim import YtdlpShimClient
 
 logger = structlog.get_logger(__name__)
 
@@ -62,6 +70,33 @@ logger = structlog.get_logger(__name__)
 def _query_for(request_row: Request) -> str:
     parts = [request_row.artist, request_row.title]
     return " ".join(p for p in parts if p)
+
+
+async def _poll_until_settled(
+    check: Callable[[], Awaitable[bool]], settings: Settings
+) -> bool:
+    """Poll `check` on a bounded interval until it returns True or the timeout elapses.
+
+    Shared by the slskd and ytdlp-shim tiers, both of which start a real, non-instant transfer
+    and then need to wait on it. `FULFILLMENT_POLL_INTERVAL_SECONDS` and
+    `FULFILLMENT_DOWNLOAD_TIMEOUT_SECONDS` existed in Settings since Phase 1 but were never
+    actually wired to anything: the slskd tier checked completion exactly once, immediately
+    after enqueueing, which fails on essentially every real download since a Soulseek transfer
+    is never done in the same instant it was started. This closes that gap for both tiers at
+    once rather than fixing it only for the new one.
+
+    This blocks the single fulfillment worker for up to the configured timeout, by design: the
+    worker processes one job at a time and the timeout default (900s) is the intended per-job
+    ceiling for a single-user, one-song-at-a-time service, not an incidental side effect.
+    """
+    deadline = (
+        asyncio.get_event_loop().time() + settings.fulfillment_download_timeout_seconds
+    )
+    while asyncio.get_event_loop().time() < deadline:
+        if await check():
+            return True
+        await asyncio.sleep(settings.fulfillment_poll_interval_seconds)
+    return False
 
 
 async def _log_attempt(
@@ -447,7 +482,23 @@ async def _try_slskd(
         outcome=FulfillmentOutcome.DOWNLOAD_STARTED,
     )
 
-    if not await slskd.is_download_complete(username, winner.identifier):
+    completed = await _poll_until_settled(
+        lambda: slskd.is_download_complete(username, winner.identifier), settings
+    )
+    if not completed:
+        await _log_attempt(
+            session,
+            request_row,
+            backend="slskd",
+            query_used=query,
+            candidates_considered=None,
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+            detail=(
+                f"Transfer did not complete within "
+                f"{settings.fulfillment_download_timeout_seconds}s"
+            ),
+        )
         return False
 
     source_file = staging_dir / Path(winner.identifier).name
@@ -474,6 +525,176 @@ async def _try_slskd(
         outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
     )
     # Move, not copy: source is Cadence's own staging dir, nothing is seeding it.
+    await _finalize_file(
+        session, request_row, settings, source_file=source_file, preserve_source=False
+    )
+    return True
+
+
+async def _try_ytdlp(
+    session: AsyncSession, request_row: Request, settings: Settings, staging_dir: Path
+) -> bool:
+    ytdlp = YtdlpShimClient(settings.ytdlp_shim_url)
+    query = _query_for(request_row)
+
+    if not ytdlp.configured:
+        await _log_attempt(
+            session,
+            request_row,
+            backend="ytdlp",
+            query_used=query,
+            candidates_considered=None,
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.SKIPPED_NOT_CONFIGURED,
+        )
+        return False
+
+    try:
+        results = await ytdlp.search(query)
+    except Exception as exc:  # noqa: BLE001
+        await _log_attempt(
+            session,
+            request_row,
+            backend="ytdlp",
+            query_used=query,
+            candidates_considered=None,
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.ERROR,
+            detail=str(exc),
+        )
+        return False
+
+    if not results:
+        await _log_attempt(
+            session,
+            request_row,
+            backend="ytdlp",
+            query_used=query,
+            candidates_considered=[],
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.SEARCHED_NO_CANDIDATES,
+        )
+        return False
+
+    # A YouTube video title is the only signal available before download (there is no file
+    # extension or bitrate to weigh the way Prowlarr/slskd candidates carry), so format_score
+    # stays at its neutral default and matches_preference stays True: a format preference is
+    # meaningless against a source that always extracts whatever "best" audio yt-dlp finds.
+    # seeders is left unset (None), which ScoredCandidate treats as "not applicable" rather
+    # than "zero", the same way a Soulseek candidate has no torrent swarm to weigh either.
+    scored = [
+        ScoredCandidate(
+            identifier=r.get("video_id", ""),
+            raw_name=r.get("title", ""),
+            similarity=title_artist_similarity(
+                r.get("title", ""), request_row.title, request_row.artist
+            ),
+            format_score=0,
+            size_bytes=None,
+            extra={
+                "uploader": r.get("uploader"),
+                "duration_seconds": r.get("duration_seconds"),
+            },
+        )
+        for r in results
+    ]
+    candidates_summary = [
+        {"name": c.raw_name, "similarity": round(c.similarity, 3), "extra": c.extra}
+        for c in scored
+    ]
+
+    winner = best_qualifying_candidate(scored)
+    if winner is None:
+        await _log_attempt(
+            session,
+            request_row,
+            backend="ytdlp",
+            query_used=query,
+            candidates_considered=candidates_summary,
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.SEARCHED_NO_QUALIFYING_CANDIDATE,
+        )
+        return False
+
+    job_id = await ytdlp.start_download(winner.identifier)
+    if not job_id:
+        await _log_attempt(
+            session,
+            request_row,
+            backend="ytdlp",
+            query_used=query,
+            candidates_considered=candidates_summary,
+            chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
+            outcome=FulfillmentOutcome.ERROR,
+            detail="Failed to start ytdlp-shim download job",
+        )
+        return False
+
+    await _log_attempt(
+        session,
+        request_row,
+        backend="ytdlp",
+        query_used=query,
+        candidates_considered=candidates_summary,
+        chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
+        outcome=FulfillmentOutcome.DOWNLOAD_STARTED,
+    )
+
+    # _poll_until_settled only reports whether the check finally returned True; the actual
+    # state/filename/error the shim last reported is captured here as a side effect of the
+    # closure, since that detail (not just a bool) is what the audit trail needs.
+    last_status: list[tuple[str, str | None, str | None]] = []
+
+    async def _check() -> bool:
+        status = await ytdlp.get_download_status(job_id)
+        last_status.append(status)
+        return status[0] not in ("running", "unknown")
+
+    settled = await _poll_until_settled(_check, settings)
+    state, filename, error = last_status[-1] if last_status else ("unknown", None, None)
+    if not settled:
+        state, error = "timed_out", (
+            f"Cadence gave up waiting for the ytdlp-shim job after "
+            f"{settings.fulfillment_download_timeout_seconds}s"
+        )
+    if state != "completed" or not filename:
+        await _log_attempt(
+            session,
+            request_row,
+            backend="ytdlp",
+            query_used=query,
+            candidates_considered=None,
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+            detail=error or f"ytdlp-shim job ended in state {state!r}",
+        )
+        return False
+
+    source_file = staging_dir / filename
+    if not source_file.exists():
+        await _log_attempt(
+            session,
+            request_row,
+            backend="ytdlp",
+            query_used=query,
+            candidates_considered=None,
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+            detail=f"Expected completed file not found at {source_file}",
+        )
+        return False
+
+    await _log_attempt(
+        session,
+        request_row,
+        backend="ytdlp",
+        query_used=query,
+        candidates_considered=None,
+        chosen_candidate=None,
+        outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
+    )
+    # Move, not copy: same as slskd, this is Cadence's own staging dir and nothing else needs
+    # the file once it is filed into the library.
     await _finalize_file(
         session, request_row, settings, source_file=source_file, preserve_source=False
     )
@@ -511,6 +732,8 @@ async def fulfill_request(
             return
         if await _try_slskd(session, request_row, settings, staging_dir):
             return
+        if await _try_ytdlp(session, request_row, settings, staging_dir):
+            return
     except (
         Exception
     ) as exc:  # noqa: BLE001 - a crash here must fail the job, not the worker
@@ -529,7 +752,8 @@ async def fulfill_request(
 
     request_row.status = RequestStatus.FAILED
     request_row.failure_reason = (
-        "No qualifying release found on configured indexers, and the Soulseek fallback "
-        "found no exact-enough match (or is not configured) within the attempt budget."
+        "No qualifying release found on configured indexers, and neither the Soulseek nor "
+        "the YouTube fallback found an exact-enough match (or either is not configured) "
+        "within the attempt budget."
     )
     await session.commit()
