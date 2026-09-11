@@ -171,3 +171,18 @@ def best_qualifying_candidate(
     if not qualifying:
         return None
     return rank_candidates(qualifying)[0]
+
+
+def qualifying_candidates_ranked(
+    candidates: list[ScoredCandidate],
+) -> list[ScoredCandidate]:
+    """Every qualifying candidate, best first, for a tier that tries more than just #1.
+
+    A candidate can score well and still fail for a reason scoring cannot see: a torrent stuck
+    at zero seeders after the fact, a Soulseek peer that goes offline mid-transfer, a YouTube
+    video pulled for a copyright claim between being indexed and being fetched. Handing back
+    the full ranked list lets a fulfillment tier fall through to the next-best candidate on a
+    genuine failure instead of writing off the whole tier because its single top pick didn't
+    pan out, exactly the gap a real fulfillment attempt hit in production.
+    """
+    return rank_candidates([c for c in candidates if c.qualifies])

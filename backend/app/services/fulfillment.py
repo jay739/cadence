@@ -53,10 +53,10 @@ from app.services.pathsafety import PathSafetyError, render_library_path
 from app.services.qbittorrent import QBittorrentClient
 from app.services.scoring import (
     ScoredCandidate,
-    best_qualifying_candidate,
     extract_extension,
     format_rank,
     matches_preferred_format,
+    qualifying_candidates_ranked,
     title_artist_similarity,
 )
 from app.services.settings_store import apply_effective_settings
@@ -267,8 +267,8 @@ async def _try_prowlarr(
         for c in scored
     ]
 
-    winner = best_qualifying_candidate(scored)
-    if winner is None:
+    ranked = qualifying_candidates_ranked(scored)
+    if not ranked:
         await _log_attempt(
             session,
             request_row,
@@ -281,61 +281,158 @@ async def _try_prowlarr(
         )
         return False
 
-    indexer_id = winner.extra.get("indexerId")
-    grabbed = (
-        await prowlarr.grab(winner.identifier, indexer_id)
-        if indexer_id is not None
-        else False
-    )
-    if not grabbed:
-        await _log_attempt(
-            session,
-            request_row,
-            backend="prowlarr",
-            query_used=query,
-            candidates_considered=candidates_summary,
-            chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
-            outcome=FulfillmentOutcome.ERROR,
-            detail="Grab call to Prowlarr failed",
-        )
-        return False
-
-    await _log_attempt(
-        session,
-        request_row,
-        backend="prowlarr",
-        query_used=query,
-        candidates_considered=candidates_summary,
-        chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
-        outcome=FulfillmentOutcome.GRABBED,
-    )
-
     if not qbt.configured:
         await _log_attempt(
             session,
             request_row,
             backend="prowlarr",
             query_used=query,
-            candidates_considered=None,
+            candidates_considered=candidates_summary,
             chosen_candidate=None,
             outcome=FulfillmentOutcome.SKIPPED_NOT_CONFIGURED,
-            detail="Grabbed via Prowlarr but qBittorrent is not configured to confirm completion",
+            detail=(
+                "Prowlarr is configured but qBittorrent is not, so a grab could never be "
+                "confirmed"
+            ),
         )
         return False
 
-    torrent = await qbt.find_torrent_by_hint(winner.raw_name)
-    if torrent is None:
-        return False
-    if not await qbt.is_complete(torrent["hash"]):
-        return False
+    # Try candidates in score order, falling through to the next on any real failure.
+    # Bounded: each attempt costs a real download-timeout wait.
+    for candidate in ranked[: settings.fulfillment_max_candidate_attempts]:
+        # Check for an already-present torrent BEFORE grabbing. A retry after a prior
+        # DOWNLOAD_FAILED (the transfer never finished, not that grabbing itself failed)
+        # re-scores the same candidates and would otherwise call grab() on a release
+        # qBittorrent already has, which fails outright rather than resuming it. Adopting the
+        # existing torrent instead is what the retry actually needs.
+        torrent = await qbt.find_torrent_by_hint(candidate.raw_name)
+        if torrent is not None:
+            await _log_attempt(
+                session,
+                request_row,
+                backend="prowlarr",
+                query_used=query,
+                candidates_considered=candidates_summary,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.GRABBED,
+                detail="Already present in qBittorrent from a prior attempt, resuming it",
+            )
+        else:
+            indexer_id = candidate.extra.get("indexerId")
+            grabbed = (
+                await prowlarr.grab(candidate.identifier, indexer_id)
+                if indexer_id is not None
+                else False
+            )
+            if not grabbed:
+                await _log_attempt(
+                    session,
+                    request_row,
+                    backend="prowlarr",
+                    query_used=query,
+                    candidates_considered=candidates_summary,
+                    chosen_candidate={
+                        "name": candidate.raw_name,
+                        "similarity": candidate.similarity,
+                    },
+                    outcome=FulfillmentOutcome.ERROR,
+                    detail="Grab call to Prowlarr failed",
+                )
+                continue
 
-    content_name = await qbt.get_content_path(torrent["hash"])
-    if not content_name:
-        return False
+            await _log_attempt(
+                session,
+                request_row,
+                backend="prowlarr",
+                query_used=query,
+                candidates_considered=candidates_summary,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.GRABBED,
+            )
 
-    save_path = Path(torrent.get("save_path", staging_dir))
-    source_file = save_path / content_name
-    if not source_file.exists():
+            torrent = await qbt.find_torrent_by_hint(candidate.raw_name)
+            if torrent is None:
+                await _log_attempt(
+                    session,
+                    request_row,
+                    backend="prowlarr",
+                    query_used=query,
+                    candidates_considered=None,
+                    chosen_candidate={
+                        "name": candidate.raw_name,
+                        "similarity": candidate.similarity,
+                    },
+                    outcome=FulfillmentOutcome.ERROR,
+                    detail="Grabbed via Prowlarr but qBittorrent never picked it up",
+                )
+                continue
+
+        torrent_hash = torrent["hash"]
+
+        async def _check(torrent_hash: str = torrent_hash) -> bool:
+            return await qbt.is_complete(torrent_hash)
+
+        completed = await _poll_until_settled(_check, settings)
+        if not completed:
+            await _log_attempt(
+                session,
+                request_row,
+                backend="prowlarr",
+                query_used=query,
+                candidates_considered=None,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+                detail=(
+                    f"Torrent did not complete within "
+                    f"{settings.fulfillment_download_timeout_seconds}s"
+                ),
+            )
+            continue
+
+        content_name = await qbt.get_content_path(torrent["hash"])
+        if not content_name:
+            await _log_attempt(
+                session,
+                request_row,
+                backend="prowlarr",
+                query_used=query,
+                candidates_considered=None,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+                detail="Torrent completed but qBittorrent reported no content path",
+            )
+            continue
+
+        save_path = Path(torrent.get("save_path", staging_dir))
+        source_file = save_path / content_name
+        if not source_file.exists():
+            await _log_attempt(
+                session,
+                request_row,
+                backend="prowlarr",
+                query_used=query,
+                candidates_considered=None,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+                detail=f"Expected completed file not found at {source_file}",
+            )
+            continue
+
         await _log_attempt(
             session,
             request_row,
@@ -343,25 +440,19 @@ async def _try_prowlarr(
             query_used=query,
             candidates_considered=None,
             chosen_candidate=None,
-            outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
-            detail=f"Expected completed file not found at {source_file}",
+            outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
         )
-        return False
+        # preserve_source: this file is qBittorrent's, and it is still seeding it.
+        await _finalize_file(
+            session,
+            request_row,
+            settings,
+            source_file=source_file,
+            preserve_source=True,
+        )
+        return True
 
-    await _log_attempt(
-        session,
-        request_row,
-        backend="prowlarr",
-        query_used=query,
-        candidates_considered=None,
-        chosen_candidate=None,
-        outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
-    )
-    # preserve_source: this file is qBittorrent's, and it is still seeding it.
-    await _finalize_file(
-        session, request_row, settings, source_file=source_file, preserve_source=True
-    )
-    return True
+    return False
 
 
 async def _try_slskd(
@@ -430,8 +521,8 @@ async def _try_slskd(
         for c in scored
     ]
 
-    winner = best_qualifying_candidate(scored)
-    if winner is None:
+    ranked = qualifying_candidates_ranked(scored)
+    if not ranked:
         await _log_attempt(
             session,
             request_row,
@@ -443,49 +534,106 @@ async def _try_slskd(
         )
         return False
 
-    username = winner.extra.get("username")
-    if not username:
+    # Try candidates in score order, falling through to the next on any real failure (a peer
+    # gone offline mid-transfer, a transfer that never completes). Bounded: each attempt costs
+    # a real download-timeout wait.
+    for candidate in ranked[: settings.fulfillment_max_candidate_attempts]:
+        username = candidate.extra.get("username")
+        if not username:
+            await _log_attempt(
+                session,
+                request_row,
+                backend="slskd",
+                query_used=query,
+                candidates_considered=candidates_summary,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.ERROR,
+                detail="Selected Soulseek candidate had no associated username",
+            )
+            continue
+        started = await slskd.enqueue_download(
+            username, candidate.identifier, candidate.size_bytes
+        )
+        if not started:
+            await _log_attempt(
+                session,
+                request_row,
+                backend="slskd",
+                query_used=query,
+                candidates_considered=candidates_summary,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.ERROR,
+                detail="Failed to enqueue Soulseek download",
+            )
+            continue
+
         await _log_attempt(
             session,
             request_row,
             backend="slskd",
             query_used=query,
             candidates_considered=candidates_summary,
-            chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
-            outcome=FulfillmentOutcome.ERROR,
-            detail="Selected Soulseek candidate had no associated username",
+            chosen_candidate={
+                "name": candidate.raw_name,
+                "similarity": candidate.similarity,
+            },
+            outcome=FulfillmentOutcome.DOWNLOAD_STARTED,
         )
-        return False
-    started = await slskd.enqueue_download(
-        username, winner.identifier, winner.size_bytes
-    )
-    if not started:
-        await _log_attempt(
-            session,
-            request_row,
-            backend="slskd",
-            query_used=query,
-            candidates_considered=candidates_summary,
-            chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
-            outcome=FulfillmentOutcome.ERROR,
-            detail="Failed to enqueue Soulseek download",
-        )
-        return False
 
-    await _log_attempt(
-        session,
-        request_row,
-        backend="slskd",
-        query_used=query,
-        candidates_considered=candidates_summary,
-        chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
-        outcome=FulfillmentOutcome.DOWNLOAD_STARTED,
-    )
+        # Same narrowing gap as job_id elsewhere in this file: the `if not username: continue`
+        # guard above already rules out None, but that does not reach a nested function's own
+        # default value, hence the explicit re-typed local.
+        confirmed_username: str = username
+        candidate_identifier = candidate.identifier
 
-    completed = await _poll_until_settled(
-        lambda: slskd.is_download_complete(username, winner.identifier), settings
-    )
-    if not completed:
+        async def _check(
+            username: str = confirmed_username, identifier: str = candidate_identifier
+        ) -> bool:
+            return await slskd.is_download_complete(username, identifier)
+
+        completed = await _poll_until_settled(_check, settings)
+        if not completed:
+            await _log_attempt(
+                session,
+                request_row,
+                backend="slskd",
+                query_used=query,
+                candidates_considered=None,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+                detail=(
+                    f"Transfer did not complete within "
+                    f"{settings.fulfillment_download_timeout_seconds}s"
+                ),
+            )
+            continue
+
+        source_file = staging_dir / Path(candidate.identifier).name
+        if not source_file.exists():
+            await _log_attempt(
+                session,
+                request_row,
+                backend="slskd",
+                query_used=query,
+                candidates_considered=None,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+                detail=f"Expected completed file not found at {source_file}",
+            )
+            continue
+
         await _log_attempt(
             session,
             request_row,
@@ -493,42 +641,19 @@ async def _try_slskd(
             query_used=query,
             candidates_considered=None,
             chosen_candidate=None,
-            outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
-            detail=(
-                f"Transfer did not complete within "
-                f"{settings.fulfillment_download_timeout_seconds}s"
-            ),
+            outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
         )
-        return False
-
-    source_file = staging_dir / Path(winner.identifier).name
-    if not source_file.exists():
-        await _log_attempt(
+        # Move, not copy: source is Cadence's own staging dir, nothing is seeding it.
+        await _finalize_file(
             session,
             request_row,
-            backend="slskd",
-            query_used=query,
-            candidates_considered=None,
-            chosen_candidate=None,
-            outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
-            detail=f"Expected completed file not found at {source_file}",
+            settings,
+            source_file=source_file,
+            preserve_source=False,
         )
-        return False
+        return True
 
-    await _log_attempt(
-        session,
-        request_row,
-        backend="slskd",
-        query_used=query,
-        candidates_considered=None,
-        chosen_candidate=None,
-        outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
-    )
-    # Move, not copy: source is Cadence's own staging dir, nothing is seeding it.
-    await _finalize_file(
-        session, request_row, settings, source_file=source_file, preserve_source=False
-    )
-    return True
+    return False
 
 
 async def _try_ytdlp(
@@ -603,8 +728,8 @@ async def _try_ytdlp(
         for c in scored
     ]
 
-    winner = best_qualifying_candidate(scored)
-    if winner is None:
+    ranked = qualifying_candidates_ranked(scored)
+    if not ranked:
         await _log_attempt(
             session,
             request_row,
@@ -616,48 +741,102 @@ async def _try_ytdlp(
         )
         return False
 
-    job_id = await ytdlp.start_download(winner.identifier)
-    if not job_id:
+    # Try candidates in score order, falling through to the next on any real failure. A
+    # candidate can score well and still not pan out for a reason scoring cannot see: this
+    # tier once picked a video removed for a copyright claim between being indexed and being
+    # fetched, and simply gave up rather than trying the next of nine other qualifying results
+    # it had already found. Bounded, since each attempt costs a real download-timeout wait.
+    for candidate in ranked[: settings.fulfillment_max_candidate_attempts]:
+        job_id = await ytdlp.start_download(candidate.identifier)
+        if not job_id:
+            await _log_attempt(
+                session,
+                request_row,
+                backend="ytdlp",
+                query_used=query,
+                candidates_considered=candidates_summary,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.ERROR,
+                detail="Failed to start ytdlp-shim download job",
+            )
+            continue
+
         await _log_attempt(
             session,
             request_row,
             backend="ytdlp",
             query_used=query,
             candidates_considered=candidates_summary,
-            chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
-            outcome=FulfillmentOutcome.ERROR,
-            detail="Failed to start ytdlp-shim download job",
+            chosen_candidate={
+                "name": candidate.raw_name,
+                "similarity": candidate.similarity,
+            },
+            outcome=FulfillmentOutcome.DOWNLOAD_STARTED,
         )
-        return False
 
-    await _log_attempt(
-        session,
-        request_row,
-        backend="ytdlp",
-        query_used=query,
-        candidates_considered=candidates_summary,
-        chosen_candidate={"name": winner.raw_name, "similarity": winner.similarity},
-        outcome=FulfillmentOutcome.DOWNLOAD_STARTED,
-    )
+        # job_id is `str` from here on (the `if not job_id: continue` guard above already
+        # ruled out None), but that narrowing does not reach a nested function's own default
+        # value, hence the explicit re-typed local rather than reusing job_id directly there.
+        started_job_id: str = job_id
 
-    # _poll_until_settled only reports whether the check finally returned True; the actual
-    # state/filename/error the shim last reported is captured here as a side effect of the
-    # closure, since that detail (not just a bool) is what the audit trail needs.
-    last_status: list[tuple[str, str | None, str | None]] = []
+        # _poll_until_settled only reports whether the check finally returned True; the
+        # actual state/filename/error the shim last reported is captured here as a side
+        # effect of the closure, since that detail (not just a bool) is what the audit trail
+        # needs.
+        last_status: list[tuple[str, str | None, str | None]] = []
 
-    async def _check() -> bool:
-        status = await ytdlp.get_download_status(job_id)
-        last_status.append(status)
-        return status[0] not in ("running", "unknown")
+        async def _check(
+            job_id: str = started_job_id, last_status: list = last_status
+        ) -> bool:
+            status = await ytdlp.get_download_status(job_id)
+            last_status.append(status)
+            return status[0] not in ("running", "unknown")
 
-    settled = await _poll_until_settled(_check, settings)
-    state, filename, error = last_status[-1] if last_status else ("unknown", None, None)
-    if not settled:
-        state, error = "timed_out", (
-            f"Cadence gave up waiting for the ytdlp-shim job after "
-            f"{settings.fulfillment_download_timeout_seconds}s"
+        settled = await _poll_until_settled(_check, settings)
+        state, filename, error = (
+            last_status[-1] if last_status else ("unknown", None, None)
         )
-    if state != "completed" or not filename:
+        if not settled:
+            state, error = "timed_out", (
+                f"Cadence gave up waiting for the ytdlp-shim job after "
+                f"{settings.fulfillment_download_timeout_seconds}s"
+            )
+        if state != "completed" or not filename:
+            await _log_attempt(
+                session,
+                request_row,
+                backend="ytdlp",
+                query_used=query,
+                candidates_considered=None,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+                detail=error or f"ytdlp-shim job ended in state {state!r}",
+            )
+            continue
+
+        source_file = staging_dir / filename
+        if not source_file.exists():
+            await _log_attempt(
+                session,
+                request_row,
+                backend="ytdlp",
+                query_used=query,
+                candidates_considered=None,
+                chosen_candidate={
+                    "name": candidate.raw_name,
+                    "similarity": candidate.similarity,
+                },
+                outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
+                detail=f"Expected completed file not found at {source_file}",
+            )
+            continue
+
         await _log_attempt(
             session,
             request_row,
@@ -665,40 +844,20 @@ async def _try_ytdlp(
             query_used=query,
             candidates_considered=None,
             chosen_candidate=None,
-            outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
-            detail=error or f"ytdlp-shim job ended in state {state!r}",
+            outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
         )
-        return False
-
-    source_file = staging_dir / filename
-    if not source_file.exists():
-        await _log_attempt(
+        # Move, not copy: same as slskd, this is Cadence's own staging dir and nothing else
+        # needs the file once it is filed into the library.
+        await _finalize_file(
             session,
             request_row,
-            backend="ytdlp",
-            query_used=query,
-            candidates_considered=None,
-            chosen_candidate=None,
-            outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
-            detail=f"Expected completed file not found at {source_file}",
+            settings,
+            source_file=source_file,
+            preserve_source=False,
         )
-        return False
+        return True
 
-    await _log_attempt(
-        session,
-        request_row,
-        backend="ytdlp",
-        query_used=query,
-        candidates_considered=None,
-        chosen_candidate=None,
-        outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED,
-    )
-    # Move, not copy: same as slskd, this is Cadence's own staging dir and nothing else needs
-    # the file once it is filed into the library.
-    await _finalize_file(
-        session, request_row, settings, source_file=source_file, preserve_source=False
-    )
-    return True
+    return False
 
 
 async def fulfill_request(
