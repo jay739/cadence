@@ -12,6 +12,17 @@ class EmailAlreadyRegisteredError(Exception):
     pass
 
 
+class WrongPasswordError(Exception):
+    """The supplied current password did not match, so the change was refused."""
+
+
+class PasswordChangeNotSupportedError(Exception):
+    """Raised for any account with no local password to change (Navidrome-backed, or a local
+    row somehow missing its hash). The caller must not offer a password-change form for these
+    accounts at all; this exists as the server-side backstop.
+    """
+
+
 async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
     result = await session.execute(select(User).where(User.email == email.lower()))
     return result.scalar_one_or_none()
@@ -181,3 +192,55 @@ async def authenticate(
     profile = await auth.fetch_profile(identifier, password)
     user = await provision_navidrome_user(session, username=identifier, profile=profile)
     return user if user.is_active else None
+
+
+async def update_avatar(
+    session: AsyncSession, user: User, avatar_url: str | None
+) -> User:
+    """Set (or clear, with None/empty) the user's avatar URL.
+
+    Just a link, per the mission: no file upload or object storage, matching the existing
+    `Request.artwork_url` pattern elsewhere in this codebase.
+    """
+    user.avatar_url = avatar_url or None
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def update_email(session: AsyncSession, user: User, email: str) -> User:
+    """Change the user's email, re-checking uniqueness the same way registration does."""
+    email = email.lower()
+    existing = await get_user_by_email(session, email)
+    if existing is not None and existing.id != user.id:
+        raise EmailAlreadyRegisteredError(email)
+    user.email = email
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def change_password(
+    session: AsyncSession, user: User, *, current_password: str, new_password: str
+) -> User:
+    """Change a LOCAL account's password, requiring proof of the current one.
+
+    Navidrome-backed accounts have no password_hash here at all (the credential lives on the
+    Navidrome server, never mirrored locally), so there is nothing this function could
+    meaningfully change for them; it refuses outright rather than silently no-op'ing.
+
+    Bumps token_version, per the documented contract in app.core.security ("bumping
+    User.token_version ... done on password change ... invalidates all previously issued
+    tokens"): every other session gets signed out, which is the point of a password change.
+    The caller is responsible for issuing a fresh token for the session that just made this
+    request, so the user making the change does not get logged out by their own action.
+    """
+    if user.auth_provider is not AuthProvider.LOCAL or not user.password_hash:
+        raise PasswordChangeNotSupportedError()
+    if not verify_password(current_password, user.password_hash):
+        raise WrongPasswordError()
+    user.password_hash = hash_password(new_password)
+    user.token_version += 1
+    await session.commit()
+    await session.refresh(user)
+    return user

@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.user import UserRole
+from app.core.security import verify_password
+from app.models.user import AuthProvider, UserRole
 from app.services.users import (
     EmailAlreadyRegisteredError,
+    PasswordChangeNotSupportedError,
+    WrongPasswordError,
     authenticate_user,
     bootstrap_admin,
+    change_password,
     create_user,
     get_user_by_email,
     get_user_by_id,
+    update_avatar,
+    update_email,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -134,3 +140,93 @@ class TestBootstrapAdmin:
             db_session, email="idempotent@example.com", password="a-different-password"
         )
         assert first.id == second.id
+
+
+class TestUpdateAvatar:
+    async def test_sets_avatar_url(self, db_session):
+        user = await create_user(
+            db_session, email="avatar@example.com", password="a-strong-password"
+        )
+        updated = await update_avatar(db_session, user, "https://example.com/a.png")
+        assert updated.avatar_url == "https://example.com/a.png"
+
+    async def test_empty_string_clears_to_none(self, db_session):
+        user = await create_user(
+            db_session, email="avatarclear@example.com", password="a-strong-password"
+        )
+        await update_avatar(db_session, user, "https://example.com/a.png")
+        cleared = await update_avatar(db_session, user, "")
+        assert cleared.avatar_url is None
+
+
+class TestUpdateEmail:
+    async def test_changes_email(self, db_session):
+        user = await create_user(
+            db_session, email="oldmail@example.com", password="a-strong-password"
+        )
+        updated = await update_email(db_session, user, "NewMail@Example.com")
+        assert updated.email == "newmail@example.com"
+
+    async def test_rejects_email_already_owned_by_someone_else(self, db_session):
+        await create_user(
+            db_session, email="taken@example.com", password="a-strong-password"
+        )
+        user = await create_user(
+            db_session, email="wantsit@example.com", password="a-strong-password"
+        )
+        with pytest.raises(EmailAlreadyRegisteredError):
+            await update_email(db_session, user, "taken@example.com")
+
+    async def test_setting_own_current_email_does_not_conflict_with_itself(
+        self, db_session
+    ):
+        user = await create_user(
+            db_session, email="same@example.com", password="a-strong-password"
+        )
+        updated = await update_email(db_session, user, "same@example.com")
+        assert updated.email == "same@example.com"
+
+
+class TestChangePassword:
+    async def test_happy_path_rotates_hash_and_bumps_token_version(self, db_session):
+        user = await create_user(
+            db_session, email="pwchange@example.com", password="old-strong-password"
+        )
+        before_version = user.token_version
+        updated = await change_password(
+            db_session,
+            user,
+            current_password="old-strong-password",
+            new_password="new-strong-password",
+        )
+        assert verify_password("new-strong-password", updated.password_hash)
+        assert not verify_password("old-strong-password", updated.password_hash)
+        assert updated.token_version == before_version + 1
+
+    async def test_wrong_current_password_raises(self, db_session):
+        user = await create_user(
+            db_session, email="pwwrong@example.com", password="old-strong-password"
+        )
+        with pytest.raises(WrongPasswordError):
+            await change_password(
+                db_session,
+                user,
+                current_password="not-the-right-one",
+                new_password="new-strong-password",
+            )
+
+    async def test_navidrome_account_is_refused(self, db_session):
+        user = await create_user(
+            db_session, email="pwnavidrome@example.com", password="whatever-password"
+        )
+        user.auth_provider = AuthProvider.NAVIDROME
+        user.password_hash = None
+        await db_session.commit()
+
+        with pytest.raises(PasswordChangeNotSupportedError):
+            await change_password(
+                db_session,
+                user,
+                current_password="whatever-password",
+                new_password="new-strong-password",
+            )

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { api, loadStoredToken, setAuthToken } from "../api/client";
-import type { User } from "../types/api";
+import type { AuthResponse, User } from "../types/api";
 import { AuthContext } from "./authContextInstance";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -57,8 +57,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const applySession = useCallback((result: AuthResponse) => {
+    setAuthToken(result.access_token);
+    setUser(result.user);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, setUser, applySession }}>
       {children}
     </AuthContext.Provider>
   );
