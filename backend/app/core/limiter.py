@@ -15,6 +15,23 @@ from slowapi.util import get_remote_address
 limiter = Limiter(key_func=get_remote_address, default_limits=[])
 
 AUTH_RATE_LIMIT = "10/minute"
+
+
+def auth_rate_limit() -> str:
+    """Resolve the auth limit per request rather than pinning it at import time.
+
+    Every other limit here is a fixed constant, and this one's default is unchanged. It is
+    configurable because the limit is keyed by client IP, which is not always one person: a
+    deployment behind a reverse proxy that does not forward the real client address, or one
+    reached over a shared/CGNAT egress, can have an entire household share a single bucket and
+    trip a 10/minute auth limit through ordinary use. The end-to-end suite hits the same wall
+    for the same reason, since it signs in once per test from one address.
+    """
+    from app.core.config import get_settings
+
+    return get_settings().auth_rate_limit
+
+
 SEARCH_RATE_LIMIT = "30/minute"
 # The streaming variant gets double the batch budget because search-as-you-type legitimately
 # fires several debounced requests per query a user types (each abandoned one cancels its

@@ -24,5 +24,9 @@ cp -r "$WEB_DIR"/dist/. "$STATIC_DIR"/
 
 export DEMO_MODE=true
 export DATA_DIR="$DATA_DIR"
+# The suite signs in once per test from a single address, so the production default of
+# 10/minute starts returning 429 partway through and fails whichever tests happen to run last.
+# Raised only for this throwaway harness; the default is unchanged everywhere else.
+export AUTH_RATE_LIMIT="1000/minute"
 
 exec "$PYTHON_BIN" -m uvicorn app.main:app --app-dir "$BACKEND_DIR" --host 127.0.0.1 --port "$PORT"
