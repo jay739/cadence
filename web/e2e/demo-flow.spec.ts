@@ -131,6 +131,28 @@ test.describe("Demo mode: request history and fulfillment visibility", () => {
   });
 });
 
+test.describe("Tab navigation", () => {
+  test("navigating between tabs lands on the right route and shows the right content", async ({
+    page,
+  }) => {
+    await login(page, USER_EMAIL, USER_PASSWORD);
+
+    // Search is the landing tab post-login.
+    await expect(page).toHaveURL(/\/search$/);
+    await expect(page.getByRole("searchbox")).toBeVisible();
+
+    // The route-transition wrapper (see RouteTransition.tsx) must not interfere with the
+    // route actually changing or the destination page's content rendering.
+    await page.getByRole("link", { name: "Your requests" }).click();
+    await expect(page).toHaveURL(/\/requests$/);
+    await expect(page.getByRole("searchbox")).not.toBeVisible();
+
+    await page.getByRole("link", { name: "Search" }).click();
+    await expect(page).toHaveURL(/\/search$/);
+    await expect(page.getByRole("searchbox")).toBeVisible();
+  });
+});
+
 test.describe("Auth guarding", () => {
   test("unauthenticated visitors are redirected to login", async ({ page }) => {
     await page.goto("/search");

@@ -1,7 +1,8 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { BrandMark } from "./BrandMark";
 import { SetupBanner } from "./SetupBanner";
+import { RouteTransition } from "./RouteTransition";
 import { ThemeToggle } from "./ThemeToggle";
 import "./AppShell.css";
 
@@ -50,7 +51,7 @@ export function AppShell() {
       </header>
       {user?.role === "admin" && <SetupBanner />}
       <main className="shell__main">
-        <Outlet />
+        <RouteTransition />
       </main>
     </div>
   );
