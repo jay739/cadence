@@ -42,3 +42,11 @@ class SourceSearchResult(BaseModel):
 class MultiSearchResponse(BaseModel):
     query: str
     sources: list[SourceSearchResult]
+
+
+class ResolveLinkRequest(BaseModel):
+    """Body for POST /api/search/resolve-link: a pasted direct track URL (Spotify or Apple
+    Music) to resolve to one exact TrackResult, as an alternative to free-text search.
+    """
+
+    url: str = Field(min_length=1, max_length=2048)

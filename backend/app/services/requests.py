@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.models.request import Request, RequestStatus
 from app.models.user import User
 from app.schemas.request import ApproveRequestIn, CreateRequestIn, RejectRequestIn
+from app.services.webhook_delivery import notify_webhook
 
 
 def compute_dedupe_key(source: str, source_id: str) -> str:
@@ -145,6 +146,13 @@ async def approve_request(
     request_row.admin_note = body.note
     await session.commit()
     await session.refresh(request_row)
+
+    # Strictly after the commit above, never before or interleaved with it: a webhook
+    # delivery failure must never affect the approval that already succeeded.
+    owner = await session.get(User, request_row.user_id)
+    if owner is not None:
+        await notify_webhook(owner, request_row, "approved")
+
     return request_row
 
 

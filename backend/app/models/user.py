@@ -84,6 +84,13 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # User-supplied HTTP(S) endpoint Cadence POSTs a small JSON payload to whenever one of this
+    # user's own requests transitions to approved or fulfilled. Null (the default) means no
+    # webhook is configured -- entirely opt-in. This value is fully user-supplied and a
+    # textbook SSRF vector, so every delivery is routed through app.core.safe_http's
+    # POLICY_PUBLIC_ONLY guard rather than a raw HTTP call; see app.services.webhook_delivery.
+    webhook_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
     requests: Mapped[list[Request]] = relationship(back_populates="user")
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper

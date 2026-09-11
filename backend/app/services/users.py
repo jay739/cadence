@@ -33,6 +33,17 @@ async def get_user_by_id(session: AsyncSession, user_id: str) -> User | None:
     return result.scalar_one_or_none()
 
 
+async def set_webhook_url(
+    session: AsyncSession, user: User, webhook_url: str | None
+) -> User:
+    """Set or clear the caller's own webhook URL. Format is already validated by the schema
+    (WebhookUrlIn) before this is called; this function just persists it."""
+    user.webhook_url = webhook_url
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
 async def create_user(
     session: AsyncSession, *, email: str, password: str, role: UserRole = UserRole.USER
 ) -> User:

@@ -6,14 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.core.config import Settings, get_settings
-from app.core.limiter import AUTH_RATE_LIMIT, limiter
+from app.core.limiter import auth_rate_limit, limiter
 from app.core.security import create_session_token
 from app.models.user import AuthProvider, User, UserRole
-from app.schemas.user import LoginIn, RegisterIn, TokenOut, UserOut
+from app.schemas.user import LoginIn, RegisterIn, TokenOut, UserOut, WebhookUrlIn
 from app.services.users import (
     EmailAlreadyRegisteredError,
     authenticate,
     create_user,
+    set_webhook_url,
 )
 
 logger = structlog.get_logger(__name__)
@@ -61,7 +62,7 @@ def issue_token_response(
 
 
 @router.post("/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
-@limiter.limit(AUTH_RATE_LIMIT)
+@limiter.limit(auth_rate_limit)
 async def register(
     request: Request,
     body: RegisterIn,
@@ -83,7 +84,7 @@ async def register(
 
 
 @router.post("/login", response_model=TokenOut)
-@limiter.limit(AUTH_RATE_LIMIT)
+@limiter.limit(auth_rate_limit)
 async def login(
     request: Request,
     body: LoginIn,
@@ -120,4 +121,24 @@ async def me(
     user: User = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> UserOut:
+    return build_user_out(user, settings)
+
+
+@router.patch("/me/webhook", response_model=UserOut)
+async def update_webhook_url(
+    body: WebhookUrlIn,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> UserOut:
+    """Set or clear the caller's own webhook URL.
+
+    Cadence will POST a small JSON notification here whenever one of this user's own requests
+    is approved or fulfilled (never for rejected/failed). Generic webhook URL only for now --
+    per-service integrations (Telegram, Discord, ntfy, etc.) are a deliberate non-goal here.
+    """
+    user = await set_webhook_url(session, user, body.webhook_url)
+    logger.info(
+        "webhook_url_updated", user_id=user.id, cleared=body.webhook_url is None
+    )
     return build_user_out(user, settings)
