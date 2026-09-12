@@ -258,36 +258,38 @@ class TestAdminApprovalQueue:
         assert resp.status_code == 404
 
 
+async def _force_status(request_id: str, new_status) -> None:
+    """Set a request's status directly via the DB, the same way make_admin_headers
+    promotes a user directly rather than through the API.
+
+    Deliberately not "approve, then wait for the real background worker to fail it":
+    FulfillmentWorker.start() schedules its loop via asyncio.create_task() during the
+    app's lifespan, which this test harness runs on a DIFFERENT event loop instance than
+    the one the test body itself executes on (confirmed directly: the worker's own task
+    object reports a different get_loop() than asyncio.get_running_loop() inside the
+    test). The task exists and is not broken, it is simply never scheduled by the loop
+    the test is actually waiting on, so nothing here can rely on it running within a
+    test's lifetime. Every other test in this file (and test_fulfillment.py generally)
+    already avoids this by calling fulfill_request directly or, as here, going straight
+    to the DB; this is not a new pattern, just applied to a third status.
+
+    Module-level rather than a method: the retry tests and the accept-lossy tests both need
+    to park a request in a specific status before acting on it.
+    """
+    from sqlalchemy import select
+
+    from app.db.base import get_sessionmaker
+    from app.models.request import Request
+
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        result = await session.execute(select(Request).where(Request.id == request_id))
+        row = result.scalar_one()
+        row.status = new_status
+        await session.commit()
+
+
 class TestRetryRequest:
-    async def _force_status(self, request_id: str, new_status) -> None:
-        """Set a request's status directly via the DB, the same way make_admin_headers
-        promotes a user directly rather than through the API.
-
-        Deliberately not "approve, then wait for the real background worker to fail it":
-        FulfillmentWorker.start() schedules its loop via asyncio.create_task() during the
-        app's lifespan, which this test harness runs on a DIFFERENT event loop instance than
-        the one the test body itself executes on (confirmed directly: the worker's own task
-        object reports a different get_loop() than asyncio.get_running_loop() inside the
-        test). The task exists and is not broken, it is simply never scheduled by the loop
-        the test is actually waiting on, so nothing here can rely on it running within a
-        test's lifetime. Every other test in this file (and test_fulfillment.py generally)
-        already avoids this by calling fulfill_request directly or, as here, going straight
-        to the DB; this is not a new pattern, just applied to a third status.
-        """
-        from sqlalchemy import select
-
-        from app.db.base import get_sessionmaker
-        from app.models.request import Request
-
-        sessionmaker = get_sessionmaker()
-        async with sessionmaker() as session:
-            result = await session.execute(
-                select(Request).where(Request.id == request_id)
-            )
-            row = result.scalar_one()
-            row.status = new_status
-            await session.commit()
-
     async def test_retry_requires_auth(self, app_client):
         resp = await app_client.post("/api/requests/does-not-exist/retry")
         assert resp.status_code == 401
@@ -300,7 +302,7 @@ class TestRetryRequest:
             "/api/requests", json=_payload(), headers=user_headers
         )
         request_id = created.json()["id"]
-        await self._force_status(request_id, RequestStatus.FAILED)
+        await _force_status(request_id, RequestStatus.FAILED)
 
         resp = await app_client.post(
             f"/api/requests/{request_id}/retry", headers=user_headers
@@ -318,7 +320,7 @@ class TestRetryRequest:
             "/api/requests", json=_payload(), headers=user_headers
         )
         request_id = created.json()["id"]
-        await self._force_status(request_id, RequestStatus.FAILED)
+        await _force_status(request_id, RequestStatus.FAILED)
 
         resp = await app_client.post(
             f"/api/requests/{request_id}/retry", headers=admin_headers
@@ -339,7 +341,7 @@ class TestRetryRequest:
             "/api/requests", json=_payload(), headers=owner_headers
         )
         request_id = created.json()["id"]
-        await self._force_status(request_id, RequestStatus.FAILED)
+        await _force_status(request_id, RequestStatus.FAILED)
 
         resp = await app_client.post(
             f"/api/requests/{request_id}/retry", headers=stranger_headers
@@ -373,7 +375,7 @@ class TestRetryRequest:
             "/api/requests", json=_payload(), headers=user_headers
         )
         request_id = created.json()["id"]
-        await self._force_status(request_id, RequestStatus.FULFILLED)
+        await _force_status(request_id, RequestStatus.FULFILLED)
 
         resp = await app_client.post(
             f"/api/requests/{request_id}/retry", headers=user_headers
@@ -390,7 +392,7 @@ class TestRetryRequest:
         assert resp.status_code == 404
 
 
-class TestPreferredFormat:
+class TestDesiredQuality:
     async def test_defaults_to_any_and_is_echoed(self, app_client):
         headers = await register_and_login(
             app_client, "fmtdefault@example.com", "a-strong-password-1"
@@ -406,9 +408,10 @@ class TestPreferredFormat:
             headers=headers,
         )
         assert resp.status_code == 201
-        assert resp.json()["preferred_format"] == "any"
+        assert resp.json()["desired_quality"] == "any"
+        assert resp.json()["lossy_accepted"] is False
 
-    async def test_explicit_preference_round_trips(self, app_client):
+    async def test_explicit_quality_round_trips(self, app_client):
         headers = await register_and_login(
             app_client, "fmtflac@example.com", "a-strong-password-1"
         )
@@ -419,16 +422,16 @@ class TestPreferredFormat:
                 "source_id": "fmt-2",
                 "title": "Some Song",
                 "artist": "Some Artist",
-                "preferred_format": "flac",
+                "desired_quality": "lossless",
             },
             headers=headers,
         )
         assert resp.status_code == 201
-        assert resp.json()["preferred_format"] == "flac"
+        assert resp.json()["desired_quality"] == "lossless"
         listing = await app_client.get("/api/requests/mine", headers=headers)
-        assert any(r["preferred_format"] == "flac" for r in listing.json())
+        assert any(r["desired_quality"] == "lossless" for r in listing.json())
 
-    async def test_junk_preference_is_rejected(self, app_client):
+    async def test_junk_quality_is_rejected(self, app_client):
         headers = await register_and_login(
             app_client, "fmtjunk@example.com", "a-strong-password-1"
         )
@@ -439,8 +442,114 @@ class TestPreferredFormat:
                 "source_id": "fmt-3",
                 "title": "Some Song",
                 "artist": "Some Artist",
-                "preferred_format": "wav9000",
+                "desired_quality": "wav9000",
             },
             headers=headers,
         )
         assert resp.status_code == 422
+
+    async def test_a_container_name_is_no_longer_a_valid_ask(self, app_client):
+        # The old vocabulary is gone on purpose: "flac" was a promise about a container that
+        # the YouTube tier could never keep, which is how a FLAC request came back as Opus.
+        headers = await register_and_login(
+            app_client, "fmtold@example.com", "a-strong-password-1"
+        )
+        resp = await app_client.post(
+            "/api/requests",
+            json={
+                "source": "apple",
+                "source_id": "fmt-4",
+                "title": "Some Song",
+                "artist": "Some Artist",
+                "desired_quality": "flac",
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422
+
+
+class TestAcceptLossyRoute:
+    async def _awaiting_request(self, app_client, email: str, source_id: str):
+        headers = await register_and_login(app_client, email, "a-strong-password-1")
+        created = await app_client.post(
+            "/api/requests",
+            json={
+                "source": "apple",
+                "source_id": source_id,
+                "title": "Some Song",
+                "artist": "Some Artist",
+                "desired_quality": "lossless",
+            },
+            headers=headers,
+        )
+        assert created.status_code == 201
+        request_id = created.json()["id"]
+
+        # Park it exactly where a fulfillment pass that found only lossy copies leaves it.
+        await _force_status(request_id, RequestStatus.AWAITING_QUALITY)
+        return headers, request_id
+
+    async def test_accepting_resumes_the_request_and_records_the_decision(
+        self, app_client
+    ):
+        headers, request_id = await self._awaiting_request(
+            app_client, "acceptlossy@example.com", "lossy-1"
+        )
+
+        resp = await app_client.post(
+            f"/api/requests/{request_id}/accept-lossy", headers=headers
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        # Back in the queue, with the original ask intact and the decision recorded beside it.
+        assert body["status"] == "approved"
+        assert body["lossy_accepted"] is True
+        assert body["desired_quality"] == "lossless"
+
+    async def test_accepting_a_request_that_is_not_asking_is_a_409(self, app_client):
+        headers = await register_and_login(
+            app_client, "acceptlossy409@example.com", "a-strong-password-1"
+        )
+        created = await app_client.post(
+            "/api/requests",
+            json={
+                "source": "apple",
+                "source_id": "lossy-2",
+                "title": "Some Song",
+                "artist": "Some Artist",
+                "desired_quality": "lossless",
+            },
+            headers=headers,
+        )
+        request_id = created.json()["id"]
+
+        resp = await app_client.post(
+            f"/api/requests/{request_id}/accept-lossy", headers=headers
+        )
+
+        assert resp.status_code == 409
+        assert "pending" in resp.json()["detail"]
+
+    async def test_another_user_cannot_answer_someone_elses_request(self, app_client):
+        _owner_headers, request_id = await self._awaiting_request(
+            app_client, "acceptlossyowner@example.com", "lossy-3"
+        )
+        stranger_headers = await register_and_login(
+            app_client, "acceptlossystranger@example.com", "a-strong-password-1"
+        )
+
+        resp = await app_client.post(
+            f"/api/requests/{request_id}/accept-lossy", headers=stranger_headers
+        )
+
+        assert resp.status_code == 404
+
+    async def test_accepting_a_nonexistent_request_404s(self, app_client):
+        headers = await register_and_login(
+            app_client, "acceptlossy404@example.com", "a-strong-password-1"
+        )
+        resp = await app_client.post(
+            "/api/requests/does-not-exist/accept-lossy", headers=headers
+        )
+        assert resp.status_code == 404

@@ -8,7 +8,7 @@ import type {
   LibraryCheckResponse,
   MultiSearchResponse,
   RequestDetail,
-  PreferredFormat,
+  DesiredQuality,
   RequestRecord,
   RequestStatusCounts,
   SearchSourceName,
@@ -142,7 +142,7 @@ export const api = {
       duration_seconds: number | null;
       artwork_url: string | null;
       musicbrainz_recording_id: string | null;
-      preferred_format: PreferredFormat;
+      desired_quality: DesiredQuality;
     }) =>
       request<RequestRecord>("/api/requests", {
         method: "POST",
@@ -164,6 +164,13 @@ export const api = {
       }),
     retry: (id: string) =>
       request<RequestRecord>(`/api/requests/${id}/retry`, {
+        method: "POST",
+      }),
+    // Answers an "awaiting_quality" request with "a lossy copy is fine", which puts it back in
+    // the fulfillment queue. A 409 (with the backend's own wording in `.message`) means the
+    // request is not actually waiting on that decision.
+    acceptLossy: (id: string) =>
+      request<RequestRecord>(`/api/requests/${id}/accept-lossy`, {
         method: "POST",
       }),
   },

@@ -36,4 +36,15 @@ All notable changes to this project are documented here. Format loosely follows
   now gets a deterministic doodle generated server-side as an inline SVG. No new dependency and
   no external avatar service, so it works on an install with no internet access.
 
+### Changed
+
+- A request now asks for a quality (`any` / `lossy` / `lossless`) instead of naming a container
+  (`any` / `mp3` / `flac`). Naming a container was a promise Cadence could not keep: a request
+  for FLAC was fulfilled with an Opus file, because the format preference only reordered
+  candidates and the YouTube tier ignored it entirely. Lossless is now a real filter, the
+  YouTube tier declines a lossless request outright (YouTube has no lossless source), and a
+  request that finds only lossy copies ends in a new `awaiting_quality` status that asks the
+  requester whether to accept one rather than silently downgrading or failing. Existing rows are
+  migrated (`flac` to `lossless`, `mp3` to `lossy`).
+
 No tagged release yet; `v0.1.0` will be cut once the pipeline is proven end to end.

@@ -97,6 +97,10 @@
   border-color: color-mix(in srgb, var(--color-status-failed) 40%, transparent);
 }
 
+.stat-tile--awaiting_quality {
+  border-color: color-mix(in srgb, var(--color-status-awaiting) 40%, transparent);
+}
+
 /* --- Avatar --- */
 
 .profile-avatar-row {

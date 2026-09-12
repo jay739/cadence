@@ -10,6 +10,11 @@ No YouTube account is ever used, anonymous yt-dlp extraction only. Signing a rea
 account into anything that shells out to yt-dlp this often is the actual account-ban risk;
 anonymous extraction has no account to lose.
 
+This service is honest about what it can deliver: every download job carries the requester's
+quality ask, and a "lossless" one is rejected outright rather than answered with the Opus/AAC
+audio YouTube actually serves. There is no lossless YouTube stream to find, so the only useful
+answer is a clear refusal that lets the caller keep looking elsewhere.
+
 API shape mirrors Cadence's own slskd client deliberately (create a job, poll it), so the
 fulfillment code that talks to this tier reads the same way as the one that talks to slskd:
 POST /search runs synchronously (a search is quick), POST /downloads starts a background job
@@ -27,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 DOWNLOADS_DIR = Path("/downloads")
 YT_DLP_TIMEOUT_SECONDS = 60
@@ -53,8 +58,27 @@ class SearchResult(BaseModel):
     duration_seconds: int | None
 
 
+# What a caller can ask this service for. There is no "lossless" *option* here, only a
+# "lossless" ask this service will refuse: YouTube serves Opus and AAC and nothing else, so a
+# lossless job is not a job that takes longer or costs more, it is one that cannot be done.
+# Accepting it and handing back an Opus file is the bug this validation exists to make
+# impossible (see the 422 in start_download).
+ACCEPTED_QUALITIES = ("any", "lossy", "lossless")
+LOSSLESS_QUALITY = "lossless"
+
+
 class DownloadRequest(BaseModel):
     video_id: str = Field(min_length=11, max_length=11)
+    # Defaults to "any" so a caller that predates this field (or genuinely does not care) keeps
+    # the exact previous behaviour: best available audio, no re-encode.
+    quality: str = Field(default="any")
+
+    @field_validator("quality")
+    @classmethod
+    def _known_quality(cls, v: str) -> str:
+        if v not in ACCEPTED_QUALITIES:
+            raise ValueError(f"quality must be one of {list(ACCEPTED_QUALITIES)}")
+        return v
 
 
 class DownloadStatus(BaseModel):
@@ -166,6 +190,14 @@ def search(body: SearchRequest) -> list[SearchResult]:
 
 
 async def _run_download_job(job_id: str, video_id: str) -> None:
+    """Extract the best available audio for one video.
+
+    Only ever reached for a "lossy" or "any" job -- a "lossless" one is refused at the route,
+    before any job exists. `--audio-format best` is deliberately a passthrough rather than a
+    conversion: it keeps whatever codec YouTube served (Opus, usually) instead of re-encoding
+    it into something that would be lossier still, or into a lossless container that would
+    misrepresent lossy audio as lossless.
+    """
     job = _jobs[job_id]
     output_template = str(DOWNLOADS_DIR / f"{video_id}.%(ext)s")
     try:
@@ -221,6 +253,19 @@ async def start_download(body: DownloadRequest) -> DownloadStatus:
     if not _VIDEO_ID_RE.match(body.video_id):
         raise HTTPException(
             status_code=422, detail="video_id must be an 11-character id"
+        )
+    if body.quality == LOSSLESS_QUALITY:
+        # Refused, not downgraded and not silently honoured. yt-dlp can happily be pointed at
+        # a YouTube stream and told to write a .flac, but that only wraps already-lossy audio
+        # in a lossless container -- a file that lies about what it is, which is worse for the
+        # requester than a plain "this tier cannot do that".
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "YouTube has no lossless source: every stream it serves is Opus or AAC. "
+                "Request 'lossy' or 'any' from this service, or fulfil the lossless request "
+                "from a source that actually has lossless audio."
+            ),
         )
     job_id = str(uuid.uuid4())
     _jobs[job_id] = _Job()

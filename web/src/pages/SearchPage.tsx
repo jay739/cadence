@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
-import type { PreferredFormat, SearchSourceName, TrackResult } from "../types/api";
+import type { DesiredQuality, SearchSourceName, TrackResult } from "../types/api";
 import { TrackCard } from "../components/TrackCard";
 import { SpotifyPersonalizationPanel } from "../components/SpotifyPersonalizationPanel";
 import { useSearchStream } from "../hooks/useSearchStream";
@@ -30,7 +30,7 @@ interface SearchResultsPanelProps {
   query: string;
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
-  onRequest: (track: TrackResult, preferredFormat: PreferredFormat) => Promise<void>;
+  onRequest: (track: TrackResult, desiredQuality: DesiredQuality) => Promise<void>;
   requestStates: Record<string, RequestState>;
 }
 
@@ -138,7 +138,7 @@ function SearchResultsPanel({
 }
 
 interface ResolveLinkPanelProps {
-  onRequest: (track: TrackResult, preferredFormat: PreferredFormat) => Promise<void>;
+  onRequest: (track: TrackResult, desiredQuality: DesiredQuality) => Promise<void>;
   requestStates: Record<string, RequestState>;
 }
 
@@ -266,10 +266,10 @@ export function SearchPage() {
   const requestMutation = useMutation({
     mutationFn: ({
       track,
-      preferredFormat,
+      desiredQuality,
     }: {
       track: TrackResult;
-      preferredFormat: PreferredFormat;
+      desiredQuality: DesiredQuality;
     }) =>
       api.requests.create({
         source: track.source,
@@ -280,15 +280,15 @@ export function SearchPage() {
         duration_seconds: track.duration_seconds,
         artwork_url: track.artwork_url,
         musicbrainz_recording_id: track.musicbrainz_recording_id,
-        preferred_format: preferredFormat,
+        desired_quality: desiredQuality,
       }),
   });
 
-  async function handleRequest(track: TrackResult, preferredFormat: PreferredFormat) {
+  async function handleRequest(track: TrackResult, desiredQuality: DesiredQuality) {
     const key = trackKey(track);
     setRequestStates((prev) => ({ ...prev, [key]: "requesting" }));
     try {
-      await requestMutation.mutateAsync({ track, preferredFormat });
+      await requestMutation.mutateAsync({ track, desiredQuality });
       setRequestStates((prev) => ({ ...prev, [key]: "requested" }));
       queryClient.invalidateQueries({ queryKey: ["my-requests"] });
     } catch {

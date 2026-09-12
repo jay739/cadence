@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
-import type { PreferredFormat, TrackResult } from "../types/api";
+import type { DesiredQuality, TrackResult } from "../types/api";
 import { TrackCard } from "./TrackCard";
 
 type RequestState = "idle" | "requesting" | "requested" | "error";
@@ -12,7 +12,7 @@ function trackKey(track: TrackResult): string {
 }
 
 interface SpotifyPersonalizationPanelProps {
-  onRequest: (track: TrackResult, preferredFormat: PreferredFormat) => Promise<void>;
+  onRequest: (track: TrackResult, desiredQuality: DesiredQuality) => Promise<void>;
   requestStates: Record<string, RequestState>;
 }
 

@@ -24,6 +24,14 @@ export function MyRequestsPage() {
     },
   });
 
+  const acceptLossy = useMutation({
+    mutationFn: (id: string) => api.requests.acceptLossy(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["profile-stats"] });
+    },
+  });
+
   return (
     <div>
       <div className="page-header">
@@ -56,6 +64,28 @@ export function MyRequestsPage() {
                 </div>
                 <StatusBadge status={request.status} />
               </Link>
+              {/* The question is asked in full on the request's own page; this is the same
+                  answer within reach from the list, since a row that needs a decision is
+                  otherwise indistinguishable from one that is simply waiting. */}
+              {request.status === "awaiting_quality" && (
+                <div className="request-row__actions">
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    disabled={acceptLossy.isPending && acceptLossy.variables === request.id}
+                    onClick={() => acceptLossy.mutate(request.id)}
+                  >
+                    Accept lossy
+                  </button>
+                  {acceptLossy.isError && acceptLossy.variables === request.id && (
+                    <p className="form-error request-row__retry-error">
+                      {acceptLossy.error instanceof ApiError
+                        ? acceptLossy.error.message
+                        : "Couldn't accept a lossy copy. Try again."}
+                    </p>
+                  )}
+                </div>
+              )}
               {request.status === "failed" && (
                 <div className="request-row__actions">
                   <button

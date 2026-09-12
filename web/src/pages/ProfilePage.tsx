@@ -9,6 +9,9 @@ const STATUS_ORDER: RequestStatus[] = [
   "pending",
   "approved",
   "downloading",
+  // Sits next to the statuses that still need something to happen, not down with the settled
+  // ones: it is the only tile whose count is a to-do list for the person reading it.
+  "awaiting_quality",
   "fulfilled",
   "rejected",
   "failed",
@@ -21,6 +24,8 @@ const STATUS_LABELS: Record<RequestStatus, string> = {
   fulfilled: "Fulfilled",
   rejected: "Rejected",
   failed: "Failed",
+  // Short enough for a stat tile; the full question lives on the request itself.
+  awaiting_quality: "Needs your call",
 };
 
 function StatsSection() {

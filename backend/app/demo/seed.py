@@ -71,9 +71,37 @@ async def seed_demo_data(session: AsyncSession) -> None:
             admin_note=seed.get("admin_note"),
             failure_reason=seed.get("failure_reason"),
             final_file_path=seed.get("final_file_path"),
+            desired_quality=seed.get("desired_quality", "any"),
         )
         session.add(row)
         await session.flush()
+
+        if status is RequestStatus.AWAITING_QUALITY:
+            # The audit row that justifies the question the UI is about to ask: this is what a
+            # real lossless request looks like after the last tier declined to hand over a
+            # lossy file on its own authority.
+            session.add(
+                FulfillmentAttempt(
+                    request_id=row.id,
+                    backend="ytdlp",
+                    query_used=f"{seed['artist']} {seed['title']}",
+                    candidates_considered=[
+                        {
+                            "name": f"{seed['artist']} - {seed['title']} (Official Video)",
+                            "similarity": 0.91,
+                        }
+                    ],
+                    chosen_candidate=None,
+                    outcome=FulfillmentOutcome.DECLINED_LOSSY_ONLY.value,
+                    detail=(
+                        "Found this track on YouTube, but YouTube has no lossless source at "
+                        "all: every stream here is Opus or AAC. This tier cannot satisfy a "
+                        "lossless request, so it declined rather than handing over a lossy "
+                        "file."
+                    ),
+                )
+            )
+            row.fulfillment_attempts_count = 1
 
         if status.value in ("downloading", "fulfilled", "failed"):
             session.add(

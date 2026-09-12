@@ -25,7 +25,7 @@ class CreateRequestIn(BaseModel):
     duration_seconds: int | None = Field(default=None, ge=0, le=36000)
     artwork_url: str | None = Field(default=None, max_length=2048)
     musicbrainz_recording_id: str | None = Field(default=None, max_length=64)
-    preferred_format: str = Field(default="any", max_length=8)
+    desired_quality: str = Field(default="any", max_length=16)
 
     @field_validator("source")
     @classmethod
@@ -35,14 +35,14 @@ class CreateRequestIn(BaseModel):
             raise ValueError(f"source must be one of {sorted(allowed)}")
         return v
 
-    @field_validator("preferred_format")
+    @field_validator("desired_quality")
     @classmethod
-    def _valid_preferred_format(cls, v: str) -> str:
-        from app.services.scoring import PREFERRED_FORMATS
+    def _valid_desired_quality(cls, v: str) -> str:
+        from app.services.scoring import DESIRED_QUALITIES
 
-        if v not in PREFERRED_FORMATS:
+        if v not in DESIRED_QUALITIES:
             raise ValueError(
-                f"preferred_format must be one of {list(PREFERRED_FORMATS)}"
+                f"desired_quality must be one of {list(DESIRED_QUALITIES)}"
             )
         return v
 
@@ -90,7 +90,11 @@ class RequestOut(BaseModel):
     source: str
     source_id: str
     musicbrainz_recording_id: str | None
-    preferred_format: str
+    desired_quality: str
+    # Whether the requester has already answered an AWAITING_QUALITY question with "a lossy
+    # copy is fine". Exposed so a client can tell a request that was fulfilled exactly as asked
+    # apart from one the requester knowingly settled for.
+    lossy_accepted: bool
     status: RequestStatus
     admin_note: str | None
     failure_reason: str | None

@@ -30,7 +30,50 @@ def _unescape_entities(value: str) -> str:
 
 
 # Formats ranked worst-to-best; used as a tiebreaker signal, never the sole criterion.
-_FORMAT_RANK = {"mp3": 1, "aac": 1, "m4a": 2, "ogg": 2, "flac": 4, "wav": 3, "alac": 4}
+_FORMAT_RANK = {
+    "mp3": 1,
+    "aac": 1,
+    "opus": 1,
+    "m4a": 2,
+    "ogg": 2,
+    "flac": 4,
+    "wav": 3,
+    "alac": 4,
+    "aiff": 3,
+    "ape": 4,
+    "wv": 4,
+}
+
+# What a candidate's audio actually is, independent of container naming. "unknown" is its own
+# answer rather than a guess in either direction: a release title with no format marker at all
+# might be lossless, and a request that asked for lossless must not be satisfied by a maybe.
+QUALITY_LOSSLESS = "lossless"
+QUALITY_LOSSY = "lossy"
+QUALITY_UNKNOWN = "unknown"
+
+_LOSSLESS_EXTENSIONS = {"flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf", "dff"}
+_LOSSY_EXTENSIONS = {"mp3", "aac", "m4a", "ogg", "opus", "wma", "mp4", "webm"}
+
+# Format markers as they appear inside release titles, which usually carry no extension at all
+# ("Artist - Album (2020) [FLAC 24bit]", "Artist - Title [320kbps MP3]"). Bitrate-style markers
+# are listed because in practice they are the only quality signal many release titles carry.
+_LOSSLESS_TOKENS = {"flac", "alac", "wav", "aiff", "ape", "wavpack", "lossless"}
+_LOSSY_TOKENS = {
+    "mp3",
+    "aac",
+    "m4a",
+    "ogg",
+    "opus",
+    "wma",
+    "lossy",
+    "320",
+    "320kbps",
+    "256",
+    "192",
+    "128",
+    "v0",
+    "v2",
+}
 
 
 def normalize_text(value: str) -> str:
@@ -68,9 +111,10 @@ def format_rank(ext: str) -> int:
     return _FORMAT_RANK.get(ext.lower().lstrip("."), 0)
 
 
-# The formats a requester can express a preference for. "any" is the neutral default: every
-# candidate counts as matching, so ordering falls through to similarity exactly as before.
-PREFERRED_FORMATS = ("any", "mp3", "flac")
+# What a requester can ask for. Deliberately not a list of containers: these three are exactly
+# the promises the fulfillment tiers can keep. "any" is the neutral default -- every candidate
+# counts as matching, so ordering falls through to similarity exactly as before.
+DESIRED_QUALITIES = ("any", "lossy", "lossless")
 
 # Above this, the fuzzy score has established song identity and the remaining decimals are
 # noise, so swarm health is allowed to decide between candidates. Below it, identity is still
@@ -78,21 +122,42 @@ PREFERRED_FORMATS = ("any", "mp3", "flac")
 CONFIDENT_MATCH_SIMILARITY = 0.85
 
 
-def matches_preferred_format(raw_name: str, preferred: str) -> bool:
-    """Whether a release/file name satisfies the requester's format preference.
+def candidate_quality(raw_name: str) -> str:
+    """Classify a release/file name as QUALITY_LOSSLESS, QUALITY_LOSSY, or QUALITY_UNKNOWN.
 
-    Checked against the filename extension when there is one, else against a format token
-    anywhere in the name (Prowlarr release titles rarely have an extension but usually carry
-    "FLAC"/"MP3"/"320" style markers). A preference is a reordering signal only: a candidate
-    that does not match is never disqualified, so preferring FLAC still downloads the MP3 when
-    that is all anyone has, rather than failing the request.
+    The filename extension decides when there is a recognised one, since that is the actual
+    file being offered. Otherwise the name's own format markers decide, because Prowlarr
+    release titles rarely carry an extension but usually carry a "FLAC"/"320"/"MP3" style
+    marker. A name with neither is QUALITY_UNKNOWN rather than being optimistically read as
+    either one.
     """
-    if preferred == "any":
-        return True
     ext = extract_extension(raw_name)
-    if ext in _FORMAT_RANK:
-        return ext == preferred
-    return preferred in normalize_text(raw_name).split()
+    if ext in _LOSSLESS_EXTENSIONS:
+        return QUALITY_LOSSLESS
+    if ext in _LOSSY_EXTENSIONS:
+        return QUALITY_LOSSY
+
+    tokens = set(normalize_text(raw_name).split())
+    # Lossless markers win a name that somehow carries both ("FLAC (MP3 also available)"):
+    # the stronger claim is the one worth checking against the ask.
+    if tokens & _LOSSLESS_TOKENS:
+        return QUALITY_LOSSLESS
+    if tokens & _LOSSY_TOKENS:
+        return QUALITY_LOSSY
+    return QUALITY_UNKNOWN
+
+
+def matches_desired_quality(raw_name: str, desired: str) -> bool:
+    """Whether a release/file name matches what the requester asked for, as a *preference*.
+
+    This is the reordering signal only -- see `qualifying_candidates_ranked(require_lossless=)`
+    for the one case (an unanswered lossless request) where quality actually excludes a
+    candidate. Everything matches "any", so ordering then falls through to similarity exactly
+    as it did before requesters could express a quality at all.
+    """
+    if desired == "any":
+        return True
+    return candidate_quality(raw_name) == desired
 
 
 @dataclass
@@ -104,6 +169,11 @@ class ScoredCandidate:
     size_bytes: int | None
     extra: dict
     matches_preference: bool = True
+    # What this candidate's audio actually is (QUALITY_LOSSLESS/LOSSY/UNKNOWN). Defaults to
+    # unknown so a tier that cannot tell says so rather than implying either answer; a tier
+    # that knows its source can only ever be one of them (YouTube is always lossy) sets it
+    # outright instead of inferring it from a name.
+    quality: str = QUALITY_UNKNOWN
     # Swarm health for torrent candidates. None means the concept does not apply (Soulseek
     # transfers are peer-direct), and is treated as neutral rather than as zero.
     seeders: int | None = None
@@ -174,7 +244,7 @@ def best_qualifying_candidate(
 
 
 def qualifying_candidates_ranked(
-    candidates: list[ScoredCandidate],
+    candidates: list[ScoredCandidate], *, require_lossless: bool = False
 ) -> list[ScoredCandidate]:
     """Every qualifying candidate, best first, for a tier that tries more than just #1.
 
@@ -184,5 +254,13 @@ def qualifying_candidates_ranked(
     the full ranked list lets a fulfillment tier fall through to the next-best candidate on a
     genuine failure instead of writing off the whole tier because its single top pick didn't
     pan out, exactly the gap a real fulfillment attempt hit in production.
+
+    `require_lossless` is the one quality gate that actually removes candidates rather than
+    reordering them, and it is set only for a lossless request the requester has not (yet)
+    agreed to downgrade. Anything not provably lossless is excluded, QUALITY_UNKNOWN included:
+    the requester asked for a guarantee, and "this release title didn't say" is not one.
     """
-    return rank_candidates([c for c in candidates if c.qualifies])
+    kept = [c for c in candidates if c.qualifies]
+    if require_lossless:
+        kept = [c for c in kept if c.quality == QUALITY_LOSSLESS]
+    return rank_candidates(kept)
