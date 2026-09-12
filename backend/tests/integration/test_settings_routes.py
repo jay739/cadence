@@ -168,6 +168,96 @@ class TestUpdateAndMasking:
         monkeypatch.delenv("SLSKD_URL", raising=False)
 
 
+class TestTestConnectionUsesEffectiveValues:
+    """The button has to work on a normally-configured install, where the browser cannot put
+    the credentials in the body: secrets are only ever sent to it masked, and an env-sourced
+    field is rendered disabled so it cannot be typed either. Testing an env-configured
+    Prowlarr used to always answer "URL and API key are both required" for exactly that
+    reason -- the request really did carry neither."""
+
+    async def test_env_sourced_values_are_used_when_the_body_is_empty(
+        self, app_client, httpx_mock, monkeypatch
+    ):
+        monkeypatch.setenv("PROWLARR_URL", "http://localhost:19696")
+        monkeypatch.setenv("PROWLARR_API_KEY", "env-key")
+        headers = await make_admin_headers(app_client)
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:19696/api/v1/system/status.*"),
+            json={"version": "1.0"},
+        )
+        resp = await app_client.post(
+            "/api/admin/settings/prowlarr/test", json={}, headers=headers
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        monkeypatch.delenv("PROWLARR_URL", raising=False)
+        monkeypatch.delenv("PROWLARR_API_KEY", raising=False)
+
+    async def test_saved_secret_is_used_when_only_the_url_is_typed(
+        self, app_client, httpx_mock
+    ):
+        headers = await make_admin_headers(app_client)
+        await app_client.put(
+            "/api/admin/settings/prowlarr",
+            json={
+                "prowlarr_url": "http://localhost:19696",
+                "prowlarr_api_key": "saved-key",
+            },
+            headers=headers,
+        )
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:19696/api/v1/system/status.*"),
+            json={"version": "1.0"},
+        )
+        # Exactly what the real UI sends: the non-secret field it can prefill, and nothing
+        # for the secret, since it never received the real one to send back.
+        resp = await app_client.post(
+            "/api/admin/settings/prowlarr/test",
+            json={"prowlarr_url": "http://localhost:19696"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    async def test_a_typed_value_still_wins_over_the_saved_one(
+        self, app_client, httpx_mock
+    ):
+        headers = await make_admin_headers(app_client)
+        await app_client.put(
+            "/api/admin/settings/prowlarr",
+            json={
+                "prowlarr_url": "http://localhost:19696",
+                "prowlarr_api_key": "saved-key",
+            },
+            headers=headers,
+        )
+        # The whole point of the button is validating something before saving it, so a typed
+        # value must be what actually gets tested.
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:19697/api/v1/system/status.*"),
+            json={"version": "1.0"},
+        )
+        resp = await app_client.post(
+            "/api/admin/settings/prowlarr/test",
+            json={"prowlarr_url": "http://localhost:19697"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    async def test_still_reports_missing_when_nothing_is_configured_anywhere(
+        self, app_client
+    ):
+        headers = await make_admin_headers(app_client)
+        resp = await app_client.post(
+            "/api/admin/settings/prowlarr/test", json={}, headers=headers
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert "required" in body["detail"].lower()
+
+
 class TestTestConnection:
     async def test_prowlarr_test_connection_success(self, app_client, httpx_mock):
         headers = await make_admin_headers(app_client)

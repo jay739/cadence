@@ -336,3 +336,53 @@ test.describe("Profile page", () => {
     await expect(avatarInput).toHaveValue("https://picsum.photos/seed/e2e-avatar/200");
   });
 });
+
+test.describe("Content Security Policy", () => {
+  test("no page load is refused by the CSP", async ({ page }) => {
+    // The backend sends `script-src 'self'`, which silently refuses inline scripts. Nothing
+    // else in this suite would notice: a blocked script leaves the page rendering fine, so
+    // the theme-init script shipped broken in production for a release, flashing the wrong
+    // theme on every load while logging a violation nobody was watching for.
+    const violations: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error" && /content security policy/i.test(m.text())) {
+        violations.push(m.text());
+      }
+    });
+
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await login(page, USER_EMAIL, USER_PASSWORD);
+    await page.goto("/requests");
+    await expect(
+      page.locator(".request-row").first().or(page.locator(".empty-state")),
+    ).toBeVisible();
+
+    expect(violations).toEqual([]);
+  });
+
+  test("the stored theme is applied before the app mounts, not after", async ({ page }) => {
+    await login(page, USER_EMAIL, USER_PASSWORD);
+    await page.evaluate(() => localStorage.setItem("cadence-theme", "light"));
+
+    // Hold the app bundle back so "before the app mounts" is actually observable. Simply
+    // waiting for data-theme to become "light" would pass either way, since React sets it on
+    // mount regardless -- which is exactly how the flash went unnoticed in the first place.
+    let releaseBundle: () => void = () => {};
+    const bundleHeld = new Promise<void>((resolve) => {
+      releaseBundle = resolve;
+    });
+    await page.route("**/assets/*.js", async (route) => {
+      await bundleHeld;
+      await route.continue();
+    });
+
+    await page.goto("/requests", { waitUntil: "commit" });
+    // The document is parsed and the pre-paint script has run, but no React code has.
+    await page.waitForFunction(() => document.readyState !== "loading");
+    const themeBeforeMount = await page.evaluate(() => document.documentElement.dataset.theme);
+    releaseBundle();
+
+    expect(themeBeforeMount).toBe("light");
+  });
+});
