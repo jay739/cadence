@@ -10,7 +10,7 @@ import type { LibraryMatch, TrackResult } from "../types/api";
  * state and no thrown exception in the return type: the caller gets a lookup table that is
  * simply empty until an answer arrives, and stays empty forever if Navidrome is unconfigured,
  * unreachable, or answers something unusable. A track missing from the table renders no badge,
- * which is exactly what should happen when the answer is unknown — claiming "not in your
+ * which is exactly what should happen when the answer is unknown, because claiming "not in your
  * library" on a failed lookup would be as wrong as a false positive.
  *
  * One request per distinct set of tracks, cached by react-query for the session. The search
