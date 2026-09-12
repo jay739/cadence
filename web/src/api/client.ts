@@ -3,6 +3,8 @@ import type {
   AuthResponse,
   HealthResponse,
   IntegrationSettings,
+  LibraryCheckItem,
+  LibraryCheckResponse,
   MultiSearchResponse,
   RequestDetail,
   DesiredQuality,
@@ -116,6 +118,17 @@ export const api = {
       request<TrackResult>("/api/search/resolve-link", {
         method: "POST",
         body: JSON.stringify({ url }),
+      }),
+  },
+  library: {
+    // Asks whether tracks are already in the Navidrome library, so a user does not queue a
+    // download of something they already own. Always resolves with a body: an unconfigured or
+    // unreachable Navidrome comes back as `available: false`, never as an error, so a caller
+    // never has to guard search behind this.
+    check: (tracks: LibraryCheckItem[]) =>
+      request<LibraryCheckResponse>("/api/library/check", {
+        method: "POST",
+        body: JSON.stringify({ tracks }),
       }),
   },
   requests: {

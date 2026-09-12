@@ -36,7 +36,17 @@ class UserOut(BaseModel):
     email: str
     role: UserRole
     auth_provider: AuthProvider
+    # The raw value the user supplied, unchanged: still null when they have not set one, so
+    # the profile form keeps round-tripping exactly what is stored.
     avatar_url: str | None = None
+    # The picture to actually render, always populated, filled in by the route handler (not
+    # derived from the ORM object) the same way `navidrome_url` below is. Either `avatar_url`,
+    # or a Navidrome picture, or a generated doodle as an inline data: URI -- see
+    # app.services.avatars for why that order and why the doodle is generated rather than
+    # fetched. Clients should render this and treat `avatar_url` as form state only.
+    avatar: str = ""
+    # Which of those three tiers `avatar` came from: "url", "navidrome" or "generated".
+    avatar_source: str = ""
     webhook_url: str | None = None
     # Only ever populated for a NAVIDROME-backed account, by the route handler (not derived
     # from the ORM object): where to send that user to manage their own password, since Cadence

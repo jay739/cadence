@@ -91,8 +91,13 @@ function AvatarSection() {
 
       <div className="profile-avatar-row">
         <div className="profile-avatar-preview">
+          {/* Preview the URL being typed; fall back to the resolved avatar (the generated
+              doodle, for anyone who has not set one) rather than an empty placeholder, so the
+              box always shows what the account will actually look like. */}
           {draft && !previewFailed ? (
             <img src={draft} alt="" onError={() => setPreviewFailed(true)} />
+          ) : user ? (
+            <img src={user.avatar} alt="" />
           ) : (
             <span className="profile-avatar-preview__fallback" aria-hidden="true" />
           )}

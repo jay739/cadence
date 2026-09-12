@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TrackCard } from "./TrackCard";
-import type { TrackResult } from "../types/api";
+import type { LibraryMatch, TrackResult } from "../types/api";
 
 const baseTrack: TrackResult = {
   source: "apple",
@@ -90,5 +90,73 @@ describe("TrackCard", () => {
     render(<TrackCard track={baseTrack} onRequest={vi.fn()} requestState="error" />);
     const button = screen.getByRole("button", { name: /try again/i });
     expect(button).not.toBeDisabled();
+  });
+
+  describe("already-in-library badge", () => {
+    const match: LibraryMatch = {
+      key: "apple:track-1",
+      navidrome_id: "nd-1",
+      title: "Tum Hi Ho",
+      artist: "Arijit Singh",
+      album: "Aashiqui 2",
+    };
+
+    it("shows the badge when the track was matched in the library", () => {
+      render(
+        <TrackCard
+          track={baseTrack}
+          onRequest={vi.fn()}
+          requestState="idle"
+          libraryMatch={match}
+        />,
+      );
+      expect(screen.getByText(/in your library/i)).toBeInTheDocument();
+    });
+
+    it("names what was matched, so the claim can be checked", () => {
+      render(
+        <TrackCard
+          track={baseTrack}
+          onRequest={vi.fn()}
+          requestState="idle"
+          libraryMatch={match}
+        />,
+      );
+      expect(screen.getByText(/in your library/i)).toHaveAttribute(
+        "title",
+        'Matched "Tum Hi Ho" by Arijit Singh on Aashiqui 2',
+      );
+    });
+
+    it("shows no badge when there is no match", () => {
+      render(<TrackCard track={baseTrack} onRequest={vi.fn()} requestState="idle" />);
+      expect(screen.queryByText(/in your library/i)).not.toBeInTheDocument();
+    });
+
+    it("shows no badge when the lookup returned nothing for this track", () => {
+      // undefined is what the lookup table yields both for a genuine miss and for a failed or
+      // unconfigured check. Silence is correct in every one of those cases.
+      render(
+        <TrackCard
+          track={baseTrack}
+          onRequest={vi.fn()}
+          requestState="idle"
+          libraryMatch={undefined}
+        />,
+      );
+      expect(screen.queryByText(/in your library/i)).not.toBeInTheDocument();
+    });
+
+    it("still lets the track be requested, since the badge is advice not a block", () => {
+      render(
+        <TrackCard
+          track={baseTrack}
+          onRequest={vi.fn()}
+          requestState="idle"
+          libraryMatch={match}
+        />,
+      );
+      expect(screen.getByRole("button", { name: /request/i })).not.toBeDisabled();
+    });
   });
 });

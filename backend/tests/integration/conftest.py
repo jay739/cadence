@@ -45,6 +45,10 @@ def _set_test_env(monkeypatch, tmp_path, *, demo_mode: bool = False) -> None:
     monkeypatch.delenv("SLSKD_URL", raising=False)
     monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)
     monkeypatch.delenv("SPOTIFY_CLIENT_SECRET", raising=False)
+    # Same reasoning as COOKIE_SECURE above: a developer's local backend/.env may well point at
+    # a real Navidrome, and the already-in-library tests assert on the unconfigured default.
+    monkeypatch.delenv("NAVIDROME_ADMIN_USER", raising=False)
+    monkeypatch.delenv("NAVIDROME_ADMIN_PASSWORD", raising=False)
     get_settings.cache_clear()
 
 

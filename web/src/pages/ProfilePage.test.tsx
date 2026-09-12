@@ -43,6 +43,10 @@ function localUser(overrides: Partial<User> = {}): User {
     role: "user",
     auth_provider: "local",
     avatar_url: null,
+    // What the backend sends for an account with no avatar_url set: a generated doodle as an
+    // inline data: URI (see backend/app/services/avatars.py), truncated here.
+    avatar: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+    avatar_source: "generated",
     navidrome_url: null,
     created_at: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -223,5 +227,29 @@ describe("ProfilePage", () => {
       user: localUser(),
     });
     expect(await screen.findByText("Password changed.")).toBeInTheDocument();
+  });
+
+  describe("avatar preview", () => {
+    it("shows the generated doodle when no avatar URL is set", async () => {
+      mockAuth(localUser());
+      mockedApi.users.stats.mockResolvedValue(stats());
+
+      renderProfilePage();
+      await screen.findByText("Total");
+
+      const preview = document.querySelector(".profile-avatar-preview")!.querySelector("img");
+      expect(preview).toHaveAttribute("src", localUser().avatar);
+    });
+
+    it("previews the supplied URL instead once one is set", async () => {
+      mockAuth(localUser({ avatar_url: "https://example.com/me.png", avatar_source: "url" }));
+      mockedApi.users.stats.mockResolvedValue(stats());
+
+      renderProfilePage();
+      await screen.findByText("Total");
+
+      const preview = document.querySelector(".profile-avatar-preview")!.querySelector("img");
+      expect(preview).toHaveAttribute("src", "https://example.com/me.png");
+    });
   });
 });
