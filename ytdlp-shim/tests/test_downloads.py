@@ -137,3 +137,71 @@ class TestDownloadLifecycle:
     async def test_polling_an_unknown_job_id_is_404_not_a_crash(self, async_client):
         resp = await async_client.get("/downloads/does-not-exist")
         assert resp.status_code == 404
+
+
+class TestQualityContract:
+    """YouTube has no lossless source, so this service must never accept a lossless job.
+
+    Refusing it here is the last line of defence for the bug that started all this: a request
+    for FLAC fulfilled with an Opus file. Cadence's own YouTube tier declines such a request
+    before it ever gets here, but this service has its own API and its own callers, and it is
+    the one that actually knows what YouTube can and cannot serve.
+    """
+
+    async def test_a_lossless_job_is_refused_before_any_subprocess_is_spawned(
+        self, async_client
+    ):
+        with patch("asyncio.create_subprocess_exec") as mocked:
+            resp = await async_client.post(
+                "/downloads", json={"video_id": VALID_ID, "quality": "lossless"}
+            )
+
+        assert resp.status_code == 422
+        # Specific and actionable, per this project's error-message bar: what is wrong, why,
+        # and what the caller can do instead.
+        detail = resp.json()["detail"]
+        assert "no lossless source" in detail
+        assert "Opus or AAC" in detail
+        mocked.assert_not_called()
+
+    async def test_a_lossy_job_runs_exactly_as_before(
+        self, async_client, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("app.main.DOWNLOADS_DIR", tmp_path)
+        (tmp_path / f"{VALID_ID}.opus").write_bytes(b"fake audio")
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new=AsyncMock(return_value=_FakeProcess(returncode=0)),
+        ):
+            create = await async_client.post(
+                "/downloads", json={"video_id": VALID_ID, "quality": "lossy"}
+            )
+            assert create.status_code == 202
+            final = await _await_job_settled(async_client, create.json()["job_id"])
+
+        assert final.json()["state"] == "completed"
+
+    async def test_an_omitted_quality_still_works_for_callers_predating_the_field(
+        self, async_client, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("app.main.DOWNLOADS_DIR", tmp_path)
+        (tmp_path / f"{VALID_ID}.opus").write_bytes(b"fake audio")
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new=AsyncMock(return_value=_FakeProcess(returncode=0)),
+        ):
+            create = await async_client.post("/downloads", json={"video_id": VALID_ID})
+            assert create.status_code == 202
+            final = await _await_job_settled(async_client, create.json()["job_id"])
+
+        assert final.json()["state"] == "completed"
+
+    async def test_an_unknown_quality_is_rejected(self, async_client):
+        with patch("asyncio.create_subprocess_exec") as mocked:
+            resp = await async_client.post(
+                "/downloads", json={"video_id": VALID_ID, "quality": "24bit-studio"}
+            )
+        assert resp.status_code == 422
+        mocked.assert_not_called()

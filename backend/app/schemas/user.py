@@ -86,6 +86,7 @@ class RequestStatusCounts(BaseModel):
     fulfilled: int
     rejected: int
     failed: int
+    awaiting_quality: int
     total: int
 
 

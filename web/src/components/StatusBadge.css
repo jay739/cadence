@@ -47,3 +47,12 @@
   border-color: color-mix(in srgb, var(--color-status-failed) 45%, transparent);
   background: color-mix(in srgb, var(--color-status-failed) 12%, transparent);
 }
+
+/* Deliberately not the failed red: nothing went wrong here, the request is waiting on a
+   decision. It borrows the pending amber's "waiting on a person" reading, at full strength so
+   it still stands out in a list next to the calmer statuses. */
+.status-badge--awaiting_quality {
+  color: var(--color-status-awaiting);
+  border-color: color-mix(in srgb, var(--color-status-awaiting) 55%, transparent);
+  background: color-mix(in srgb, var(--color-status-awaiting) 16%, transparent);
+}

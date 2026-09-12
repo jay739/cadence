@@ -32,6 +32,9 @@
   --color-status-fulfilled: #59b37c;
   --color-status-rejected: #8a8478;
   --color-status-failed: #d9564b;
+  /* Sits between the pending amber and the failure red on purpose: a request waiting on the
+     requester's own decision is neither "ticking along fine" nor "broken". */
+  --color-status-awaiting: #cf7a33;
 
   --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", serif;
   --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;

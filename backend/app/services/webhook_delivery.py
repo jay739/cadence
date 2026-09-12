@@ -1,8 +1,12 @@
 """Best-effort outbound notification to a user's configured webhook URL.
 
-Fired after a request the user owns transitions to `approved` or `fulfilled` -- never for
-`rejected` or `failed` -- from the two exact transition points: app.services.requests.
-approve_request and app.services.fulfillment._finalize_file. This is explicitly scoped to a
+Fired after a request the user owns transitions to `approved`, `fulfilled`, or
+`awaiting_quality` -- never for `rejected` or `failed` -- from three exact transition points:
+app.services.requests.approve_request, app.services.fulfillment._finalize_file, and the
+AWAITING_QUALITY branch of app.services.fulfillment.fulfill_request. That last one is the only
+event of the three the user has to act on (nothing lossless was found and Cadence is waiting on
+their answer), which is exactly why it is worth notifying rather than leaving to be discovered
+on a later visit. This is explicitly scoped to a
 single generic webhook URL for now; per-service integrations (Telegram, Discord, Pushbullet,
 ntfy, ...) are a deliberate non-goal here and can build on top of this later.
 
@@ -38,7 +42,7 @@ logger = structlog.get_logger(__name__)
 # it any longer than strictly necessary.
 _client = SafeHttpClient(timeout_seconds=5.0, max_retries=0)
 
-WebhookEvent = Literal["approved", "fulfilled"]
+WebhookEvent = Literal["approved", "fulfilled", "awaiting_quality"]
 
 
 async def notify_webhook(

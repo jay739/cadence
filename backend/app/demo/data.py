@@ -189,6 +189,7 @@ class _RequestSeed(TypedDict, total=False):
     final_file_path: str
     admin_note: str
     failure_reason: str
+    desired_quality: str
 
 
 DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
@@ -243,5 +244,16 @@ DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
         "status": RequestStatus.FAILED,
         "failure_reason": "No qualifying release found on configured indexers, "
         "and Soulseek fallback found no exact-title match within the attempt budget.",
+    },
+    {
+        "title": "Naatu Naatu",
+        "artist": "Rahul Sipligunj, Kaala Bhairava",
+        "album": "RRR",
+        "source": "musicbrainz",
+        "source_id": "demo-mbid-00000003-0000-0000-0000-000000000000",
+        "status": RequestStatus.AWAITING_QUALITY,
+        # The whole point of this seed: a lossless ask that every tier could only answer with
+        # lossy audio, parked on the requester's decision rather than quietly downgraded.
+        "desired_quality": "lossless",
     },
 ]

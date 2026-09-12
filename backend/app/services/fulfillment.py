@@ -22,7 +22,12 @@ For a single approved Request:
      with the final path recorded. The Prowlarr path COPIES, because the source is the file
      qBittorrent is still seeding and moving it errors the torrent; slskd and ytdlp-shim both
      MOVE, because their source is Cadence's own staging dir and leaving files there leaks disk.
-  6. On exhaustion of every path: mark the request failed with a human-readable reason.
+  6. On exhaustion of every path: mark the request failed with a human-readable reason -- with
+     one exception. A request that asked for lossless, where every tier found the track but
+     only ever as lossy audio (always the case once fulfillment reaches YouTube, which has no
+     lossless source at all), ends in AWAITING_QUALITY instead: neither silently downgraded to
+     a lossy file nor written off as a failure, but parked on an explicit question to the
+     requester, resumable via app.services.requests.accept_lossy_copy.
 
 Every step appends a FulfillmentAttempt row: what was searched, what candidates were seen,
 what was picked and why (or why nothing qualified). This is the audit trail required by the
@@ -35,6 +40,7 @@ import asyncio
 import os
 import shutil
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
@@ -53,10 +59,12 @@ from app.search_sources.prowlarr import ProwlarrSearchSource
 from app.services.pathsafety import PathSafetyError, render_library_path
 from app.services.qbittorrent import QBittorrentClient
 from app.services.scoring import (
+    QUALITY_LOSSY,
     ScoredCandidate,
+    candidate_quality,
     extract_extension,
     format_rank,
-    matches_preferred_format,
+    matches_desired_quality,
     qualifying_candidates_ranked,
     title_artist_similarity,
 )
@@ -67,6 +75,40 @@ from app.services.webhook_delivery import notify_webhook
 from app.services.ytdlp_shim import YtdlpShimClient
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass
+class _TierResult:
+    """What one fulfillment tier did, beyond "did it work".
+
+    `lossy_only_matches` is the signal the whole explicit-confirmation flow hangs off: this
+    tier found the requested track and could only offer it lossy, against a request that asked
+    for lossless. That is what separates a request worth asking the requester about ("we found
+    it, just not lossless") from one that simply failed ("nobody has this track").
+    """
+
+    fulfilled: bool
+    lossy_only_matches: bool = False
+
+
+def _requires_lossless(request_row: Request) -> bool:
+    """Whether this request's quality ask is currently a hard filter on candidates.
+
+    Only "lossless" is ever a hard filter, and only until the requester has agreed to settle:
+    once `lossy_accepted` is set, lossless goes back to being the same reordering preference
+    "lossy" always was, so the retry still prefers a lossless copy without refusing anything.
+    """
+    return request_row.desired_quality == "lossless" and not request_row.lossy_accepted
+
+
+def _quality_ask_for_shim(request_row: Request) -> str:
+    """The quality this request still insists on, as the ytdlp-shim's own API understands it.
+
+    A requester who has accepted a lossy copy is asking for "any" from here on, so the shim
+    must not be handed the original "lossless" and refuse a job the requester already said yes
+    to.
+    """
+    return "any" if request_row.lossy_accepted else request_row.desired_quality
 
 
 def _query_for(request_row: Request) -> str:
@@ -124,6 +166,53 @@ async def _log_attempt(
     session.add(attempt)
     request_row.fulfillment_attempts_count += 1
     await session.commit()
+
+
+async def _log_no_usable_candidate(
+    session: AsyncSession,
+    request_row: Request,
+    *,
+    backend: str,
+    query_used: str,
+    candidates_summary: list,
+    lossy_only: bool,
+    no_match_detail: str | None = None,
+    lossy_only_detail: str = (
+        "Found this track here, but only as lossy audio, and the request asked for lossless. "
+        "Not downloading it without the requester's say-so."
+    ),
+) -> _TierResult:
+    """Record why a tier that did get search results still has nothing it can download.
+
+    Two genuinely different answers, kept apart in the audit trail because only one of them is
+    worth going back to the requester about: either nothing here is the requested track at all
+    (SEARCHED_NO_QUALIFYING_CANDIDATE, as before), or it is here but only in a lossy form the
+    request asked Cadence not to accept (DECLINED_LOSSY_ONLY).
+    """
+    if lossy_only:
+        await _log_attempt(
+            session,
+            request_row,
+            backend=backend,
+            query_used=query_used,
+            candidates_considered=candidates_summary,
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.DECLINED_LOSSY_ONLY,
+            detail=lossy_only_detail,
+        )
+        return _TierResult(fulfilled=False, lossy_only_matches=True)
+
+    await _log_attempt(
+        session,
+        request_row,
+        backend=backend,
+        query_used=query_used,
+        candidates_considered=candidates_summary,
+        chosen_candidate=None,
+        outcome=FulfillmentOutcome.SEARCHED_NO_QUALIFYING_CANDIDATE,
+        detail=no_match_detail,
+    )
+    return _TierResult(fulfilled=False)
 
 
 async def _finalize_file(
@@ -201,7 +290,7 @@ async def _finalize_file(
 
 async def _try_prowlarr(
     session: AsyncSession, request_row: Request, settings: Settings, staging_dir: Path
-) -> bool:
+) -> _TierResult:
     prowlarr = ProwlarrSearchSource(settings.prowlarr_url, settings.prowlarr_api_key)
     qbt = QBittorrentClient(
         settings.qbittorrent_url,
@@ -220,7 +309,7 @@ async def _try_prowlarr(
             chosen_candidate=None,
             outcome=FulfillmentOutcome.SKIPPED_NOT_CONFIGURED,
         )
-        return False
+        return _TierResult(fulfilled=False)
 
     try:
         raw = await prowlarr.search_raw(query, limit=50)
@@ -235,7 +324,7 @@ async def _try_prowlarr(
             outcome=FulfillmentOutcome.ERROR,
             detail=str(exc),
         )
-        return False
+        return _TierResult(fulfilled=False)
 
     if not raw:
         await _log_attempt(
@@ -247,7 +336,7 @@ async def _try_prowlarr(
             chosen_candidate=None,
             outcome=FulfillmentOutcome.SEARCHED_NO_CANDIDATES,
         )
-        return False
+        return _TierResult(fulfilled=False)
 
     scored = [
         ScoredCandidate(
@@ -257,9 +346,10 @@ async def _try_prowlarr(
                 item.get("title", ""), request_row.title, request_row.artist
             ),
             format_score=format_rank(extract_extension(item.get("title", ""))),
-            matches_preference=matches_preferred_format(
-                item.get("title", ""), request_row.preferred_format
+            matches_preference=matches_desired_quality(
+                item.get("title", ""), request_row.desired_quality
             ),
+            quality=candidate_quality(item.get("title", "")),
             size_bytes=item.get("size"),
             seeders=item.get("seeders"),
             extra={
@@ -275,19 +365,18 @@ async def _try_prowlarr(
         for c in scored
     ]
 
-    ranked = qualifying_candidates_ranked(scored)
+    require_lossless = _requires_lossless(request_row)
+    ranked = qualifying_candidates_ranked(scored, require_lossless=require_lossless)
     if not ranked:
-        await _log_attempt(
+        return await _log_no_usable_candidate(
             session,
             request_row,
             backend="prowlarr",
             query_used=query,
-            candidates_considered=candidates_summary,
-            chosen_candidate=None,
-            outcome=FulfillmentOutcome.SEARCHED_NO_QUALIFYING_CANDIDATE,
-            detail="No candidate met the minimum title/artist similarity threshold",
+            candidates_summary=candidates_summary,
+            lossy_only=require_lossless and bool(qualifying_candidates_ranked(scored)),
+            no_match_detail="No candidate met the minimum title/artist similarity threshold",
         )
-        return False
 
     if not qbt.configured:
         await _log_attempt(
@@ -303,7 +392,7 @@ async def _try_prowlarr(
                 "confirmed"
             ),
         )
-        return False
+        return _TierResult(fulfilled=False)
 
     # Try candidates in score order, falling through to the next on any real failure.
     # Bounded: each attempt costs a real download-timeout wait.
@@ -458,14 +547,14 @@ async def _try_prowlarr(
             source_file=source_file,
             preserve_source=True,
         )
-        return True
+        return _TierResult(fulfilled=True)
 
-    return False
+    return _TierResult(fulfilled=False)
 
 
 async def _try_slskd(
     session: AsyncSession, request_row: Request, settings: Settings, staging_dir: Path
-) -> bool:
+) -> _TierResult:
     slskd = SlskdClient(settings.slskd_url, settings.slskd_api_key)
     query = _query_for(request_row)
 
@@ -479,7 +568,7 @@ async def _try_slskd(
             chosen_candidate=None,
             outcome=FulfillmentOutcome.SKIPPED_NOT_CONFIGURED,
         )
-        return False
+        return _TierResult(fulfilled=False)
 
     try:
         files = await slskd.search(query)
@@ -494,7 +583,7 @@ async def _try_slskd(
             outcome=FulfillmentOutcome.ERROR,
             detail=str(exc),
         )
-        return False
+        return _TierResult(fulfilled=False)
 
     if not files:
         await _log_attempt(
@@ -506,7 +595,7 @@ async def _try_slskd(
             chosen_candidate=None,
             outcome=FulfillmentOutcome.SEARCHED_NO_CANDIDATES,
         )
-        return False
+        return _TierResult(fulfilled=False)
 
     scored = [
         ScoredCandidate(
@@ -516,9 +605,10 @@ async def _try_slskd(
                 f.get("filename", ""), request_row.title, request_row.artist
             ),
             format_score=format_rank(extract_extension(f.get("filename", ""))),
-            matches_preference=matches_preferred_format(
-                f.get("filename", ""), request_row.preferred_format
+            matches_preference=matches_desired_quality(
+                f.get("filename", ""), request_row.desired_quality
             ),
+            quality=candidate_quality(f.get("filename", "")),
             size_bytes=f.get("size"),
             extra={"username": f.get("username"), "bitRate": f.get("bitRate")},
         )
@@ -529,18 +619,17 @@ async def _try_slskd(
         for c in scored
     ]
 
-    ranked = qualifying_candidates_ranked(scored)
+    require_lossless = _requires_lossless(request_row)
+    ranked = qualifying_candidates_ranked(scored, require_lossless=require_lossless)
     if not ranked:
-        await _log_attempt(
+        return await _log_no_usable_candidate(
             session,
             request_row,
             backend="slskd",
             query_used=query,
-            candidates_considered=candidates_summary,
-            chosen_candidate=None,
-            outcome=FulfillmentOutcome.SEARCHED_NO_QUALIFYING_CANDIDATE,
+            candidates_summary=candidates_summary,
+            lossy_only=require_lossless and bool(qualifying_candidates_ranked(scored)),
         )
-        return False
 
     # Try candidates in score order, falling through to the next on any real failure (a peer
     # gone offline mid-transfer, a transfer that never completes). Bounded: each attempt costs
@@ -659,14 +748,14 @@ async def _try_slskd(
             source_file=source_file,
             preserve_source=False,
         )
-        return True
+        return _TierResult(fulfilled=True)
 
-    return False
+    return _TierResult(fulfilled=False)
 
 
 async def _try_ytdlp(
     session: AsyncSession, request_row: Request, settings: Settings, staging_dir: Path
-) -> bool:
+) -> _TierResult:
     ytdlp = YtdlpShimClient(settings.ytdlp_shim_url)
     query = _query_for(request_row)
 
@@ -680,7 +769,7 @@ async def _try_ytdlp(
             chosen_candidate=None,
             outcome=FulfillmentOutcome.SKIPPED_NOT_CONFIGURED,
         )
-        return False
+        return _TierResult(fulfilled=False)
 
     try:
         results = await ytdlp.search(query)
@@ -695,7 +784,7 @@ async def _try_ytdlp(
             outcome=FulfillmentOutcome.ERROR,
             detail=str(exc),
         )
-        return False
+        return _TierResult(fulfilled=False)
 
     if not results:
         await _log_attempt(
@@ -707,14 +796,16 @@ async def _try_ytdlp(
             chosen_candidate=None,
             outcome=FulfillmentOutcome.SEARCHED_NO_CANDIDATES,
         )
-        return False
+        return _TierResult(fulfilled=False)
 
-    # A YouTube video title is the only signal available before download (there is no file
-    # extension or bitrate to weigh the way Prowlarr/slskd candidates carry), so format_score
-    # stays at its neutral default and matches_preference stays True: a format preference is
-    # meaningless against a source that always extracts whatever "best" audio yt-dlp finds.
-    # seeders is left unset (None), which ScoredCandidate treats as "not applicable" rather
-    # than "zero", the same way a Soulseek candidate has no torrent swarm to weigh either.
+    # A YouTube video title is the only identity signal available before download (there is no
+    # file extension or bitrate to weigh the way Prowlarr/slskd candidates carry), so
+    # format_score stays at its neutral default. Quality, though, is not unknown here: YouTube
+    # serves Opus/AAC and nothing else, so every candidate from this tier is flatly lossy, and
+    # saying so outright is what lets a lossless request be declined honestly instead of
+    # "succeeding" with a transcode of a lossy source. seeders is left unset (None), which
+    # ScoredCandidate treats as "not applicable" rather than "zero", the same way a Soulseek
+    # candidate has no torrent swarm to weigh either.
     scored = [
         ScoredCandidate(
             identifier=r.get("video_id", ""),
@@ -723,6 +814,8 @@ async def _try_ytdlp(
                 r.get("title", ""), request_row.title, request_row.artist
             ),
             format_score=0,
+            matches_preference=request_row.desired_quality in ("any", QUALITY_LOSSY),
+            quality=QUALITY_LOSSY,
             size_bytes=None,
             extra={
                 "uploader": r.get("uploader"),
@@ -736,18 +829,25 @@ async def _try_ytdlp(
         for c in scored
     ]
 
-    ranked = qualifying_candidates_ranked(scored)
+    require_lossless = _requires_lossless(request_row)
+    ranked = qualifying_candidates_ranked(scored, require_lossless=require_lossless)
     if not ranked:
-        await _log_attempt(
+        # The search still runs before this check, cheap and deliberate: knowing whether
+        # YouTube even has the track is what makes the question put to the requester an honest
+        # one ("we found it, but only lossy") instead of a guess.
+        return await _log_no_usable_candidate(
             session,
             request_row,
             backend="ytdlp",
             query_used=query,
-            candidates_considered=candidates_summary,
-            chosen_candidate=None,
-            outcome=FulfillmentOutcome.SEARCHED_NO_QUALIFYING_CANDIDATE,
+            candidates_summary=candidates_summary,
+            lossy_only=require_lossless and bool(qualifying_candidates_ranked(scored)),
+            lossy_only_detail=(
+                "Found this track on YouTube, but YouTube has no lossless source at all: "
+                "every stream here is Opus or AAC. This tier cannot satisfy a lossless "
+                "request, so it declined rather than handing over a lossy file."
+            ),
         )
-        return False
 
     # Try candidates in score order, falling through to the next on any real failure. A
     # candidate can score well and still not pan out for a reason scoring cannot see: this
@@ -755,7 +855,13 @@ async def _try_ytdlp(
     # fetched, and simply gave up rather than trying the next of nine other qualifying results
     # it had already found. Bounded, since each attempt costs a real download-timeout wait.
     for candidate in ranked[: settings.fulfillment_max_candidate_attempts]:
-        job_id = await ytdlp.start_download(candidate.identifier)
+        # The shim is told what this request wants rather than being left to assume. Belt and
+        # braces on top of the check above, not a substitute for it: the shim refuses a
+        # lossless job outright, so even a future regression in this tier's own filtering
+        # cannot make it quietly hand back an Opus file for a lossless request again.
+        job_id = await ytdlp.start_download(
+            candidate.identifier, quality=_quality_ask_for_shim(request_row)
+        )
         if not job_id:
             await _log_attempt(
                 session,
@@ -863,9 +969,9 @@ async def _try_ytdlp(
             source_file=source_file,
             preserve_source=False,
         )
-        return True
+        return _TierResult(fulfilled=True)
 
-    return False
+    return _TierResult(fulfilled=False)
 
 
 async def fulfill_request(
@@ -894,13 +1000,13 @@ async def fulfill_request(
     staging_dir = settings.data_dir_path / "staging"
     staging_dir.mkdir(parents=True, exist_ok=True)
 
+    lossy_only_matches = False
     try:
-        if await _try_prowlarr(session, request_row, settings, staging_dir):
-            return
-        if await _try_slskd(session, request_row, settings, staging_dir):
-            return
-        if await _try_ytdlp(session, request_row, settings, staging_dir):
-            return
+        for tier in (_try_prowlarr, _try_slskd, _try_ytdlp):
+            result = await tier(session, request_row, settings, staging_dir)
+            if result.fulfilled:
+                return
+            lossy_only_matches = lossy_only_matches or result.lossy_only_matches
     except (
         Exception
     ) as exc:  # noqa: BLE001 - a crash here must fail the job, not the worker
@@ -915,6 +1021,23 @@ async def fulfill_request(
             "Internal error during fulfillment, see server logs"
         )
         await session.commit()
+        return
+
+    if lossy_only_matches:
+        # The honest end state for "we found your track, just never in lossless". Not FAILED
+        # (nothing failed, and a retry would find the same lossy copies again) and emphatically
+        # not FULFILLED with one of those copies, which is the exact silent downgrade this
+        # whole flow exists to stop. It waits here until the requester answers.
+        request_row.status = RequestStatus.AWAITING_QUALITY
+        request_row.failure_reason = None
+        await session.commit()
+
+        # Strictly after the commit, and for the same reason approve/fulfil fire one: a
+        # request parked on a question the requester has not seen yet is the one state where
+        # telling them actually changes the outcome.
+        owner = await session.get(User, request_row.user_id)
+        if owner is not None:
+            await notify_webhook(owner, request_row, "awaiting_quality")
         return
 
     request_row.status = RequestStatus.FAILED

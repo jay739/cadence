@@ -44,14 +44,23 @@ class YtdlpShimClient:
             return []
         return resp.json()
 
-    async def start_download(self, video_id: str) -> str | None:
-        """Start a download job and return its id, or None if the shim rejected the request."""
+    async def start_download(
+        self, video_id: str, *, quality: str = "any"
+    ) -> str | None:
+        """Start a download job and return its id, or None if the shim rejected the request.
+
+        `quality` is the requester's own ask ("any" | "lossy" | "lossless") passed straight
+        through. The shim refuses a "lossless" job outright, because YouTube has no lossless
+        source to give -- that refusal arrives here as a non-202 and therefore as None, the
+        same as any other rejection, so a caller that somehow asks for the impossible gets
+        nothing rather than a quietly lossy file.
+        """
         if not self.configured:
             return None
         resp = await self._http.post(
             f"{self._base_url}/downloads",
             policy=POLICY_ALLOW_PRIVATE,
-            json={"video_id": video_id},
+            json={"video_id": video_id, "quality": quality},
         )
         if resp.status_code != 202:
             return None

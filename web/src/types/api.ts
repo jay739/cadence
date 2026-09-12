@@ -36,6 +36,7 @@ export interface RequestStatusCounts {
   fulfilled: number;
   rejected: number;
   failed: number;
+  awaiting_quality: number;
   total: number;
 }
 
@@ -47,8 +48,11 @@ export interface AuthResponse {
 
 export type SearchSourceName = "apple" | "musicbrainz" | "spotify" | "prowlarr";
 
-// Requester's audio-quality preference: reorders download candidates, never a hard filter.
-export type PreferredFormat = "any" | "mp3" | "flac";
+// What the requester asks for, in terms the fulfillment tiers can actually promise. Naming a
+// container ("FLAC") could not be promised: the YouTube tier has no lossless source at all.
+// "any" and "lossy" reorder download candidates; "lossless" is the one hard filter, and a
+// request that finds nothing lossless ends up asking rather than quietly settling.
+export type DesiredQuality = "any" | "lossy" | "lossless";
 
 export interface TrackResult {
   source: SearchSourceName;
@@ -80,7 +84,15 @@ export interface MultiSearchResponse {
 }
 
 export type RequestStatus =
-  "pending" | "approved" | "downloading" | "fulfilled" | "rejected" | "failed";
+  | "pending"
+  | "approved"
+  | "downloading"
+  | "fulfilled"
+  | "rejected"
+  | "failed"
+  // Nothing lossless was found anywhere, and the request is waiting on the requester to say
+  // whether a lossy copy will do. Neither a failure nor a silent downgrade.
+  | "awaiting_quality";
 
 export interface RequestRecord {
   id: string;
@@ -93,7 +105,11 @@ export interface RequestRecord {
   source: SearchSourceName;
   source_id: string;
   musicbrainz_recording_id: string | null;
-  preferred_format: PreferredFormat;
+  desired_quality: DesiredQuality;
+  // True once the requester has answered an "awaiting_quality" question with "lossy is fine".
+  // The original desired_quality is left alone, so a request fulfilled exactly as asked is
+  // still distinguishable from one the requester knowingly settled for.
+  lossy_accepted: boolean;
   status: RequestStatus;
   admin_note: string | null;
   failure_reason: string | null;

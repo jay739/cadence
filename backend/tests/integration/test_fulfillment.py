@@ -17,6 +17,7 @@ from app.db.base import create_all, dispose_engine, get_sessionmaker, init_engin
 from app.models.request import FulfillmentOutcome, Request, RequestStatus
 from app.models.user import User, UserRole
 from app.services.fulfillment import fulfill_request
+from app.services.requests import accept_lossy_copy
 
 pytestmark = pytest.mark.asyncio
 
@@ -61,17 +62,19 @@ def _settings(tmp_path, **overrides) -> Settings:
     )
 
 
-async def _make_request(session, user) -> Request:
-    req = Request(
-        user_id=user.id,
-        title="Tum Hi Ho",
-        artist="Arijit Singh",
-        album="Aashiqui 2",
-        source="apple",
-        source_id="track-1",
-        dedupe_key="apple:track-1",
-        status=RequestStatus.APPROVED,
-    )
+async def _make_request(session, user, **overrides) -> Request:
+    fields = {
+        "user_id": user.id,
+        "title": "Tum Hi Ho",
+        "artist": "Arijit Singh",
+        "album": "Aashiqui 2",
+        "source": "apple",
+        "source_id": "track-1",
+        "dedupe_key": "apple:track-1",
+        "status": RequestStatus.APPROVED,
+    }
+    fields.update(overrides)
+    req = Request(**fields)
     session.add(req)
     await session.commit()
     await session.refresh(req)
@@ -1013,6 +1016,429 @@ class TestFallsThroughToNextCandidateWithinATier:
         ]
         assert len(grabbed) == 1
         assert "prior attempt" in grabbed[0].detail
+
+
+class TestLosslessRequestIsNeverSilentlyDowngraded:
+    """Issue #33, the bug this whole quality model exists for.
+
+    A request that asked for lossless came back as an Opus file, because a format preference
+    only ever *reordered* candidates and the YouTube tier never even consulted it. Every test
+    here fails against that behaviour: each one would previously have ended FULFILLED with a
+    lossy file.
+
+    The mocking is deliberately sparse rather than thorough. Nothing is registered for the
+    download side of any tier, so if fulfillment were to reach for a lossy file anyway, these
+    tests fail on an unmatched HTTP request -- a stronger guarantee than asserting on the end
+    status alone, which a future refactor could satisfy while still pulling the file down.
+    """
+
+    async def test_lossy_only_prowlarr_release_is_not_grabbed_for_a_lossless_request(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user, desired_quality="lossless")
+        # qBittorrent IS configured, so nothing here is stopped by a missing download client:
+        # the only thing standing between this release and the library is the quality gate.
+        settings = _settings(
+            tmp_path,
+            PROWLARR_URL="http://localhost:9696",
+            PROWLARR_API_KEY="key123",
+            QBITTORRENT_URL="http://localhost:8080",
+            QBITTORRENT_USERNAME="admin",
+            QBITTORRENT_PASSWORD="adminpass",
+        )
+
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:9696/api/v1/search\?.*"),
+            method="GET",
+            json=[
+                {
+                    "guid": "guid-1",
+                    "title": "Arijit Singh - Tum Hi Ho [MP3 320]",
+                    "indexerId": 1,
+                    "indexer": "TestIndexer",
+                    "size": 9_000_000,
+                    "seeders": 40,
+                }
+            ],
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.AWAITING_QUALITY
+        assert request_row.final_file_path is None
+        attempts = await _attempts_of(session, request_row.id)
+        prowlarr_attempts = [a for a in attempts if a.backend == "prowlarr"]
+        assert (
+            prowlarr_attempts[-1].outcome
+            == FulfillmentOutcome.DECLINED_LOSSY_ONLY.value
+        )
+
+    async def test_lossless_release_is_still_grabbed_normally(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        """The gate must not break the case it exists to protect: a real FLAC release."""
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user, desired_quality="lossless")
+        library_dir = tmp_path / "library"
+        data_dir = tmp_path / "data"
+        settings = _settings(
+            tmp_path,
+            PROWLARR_URL="http://localhost:9696",
+            PROWLARR_API_KEY="key123",
+            QBITTORRENT_URL="http://localhost:8080",
+            QBITTORRENT_USERNAME="admin",
+            QBITTORRENT_PASSWORD="adminpass",
+        )
+
+        release_name = "Arijit Singh - Tum Hi Ho [FLAC]"
+        httpx_mock.add_response(
+            url=re.compile(r"http://localhost:9696/api/v1/search\?.*"),
+            method="GET",
+            json=[
+                # The lossy release scores higher on title similarity and has a healthier
+                # swarm, so under the old preference-only ordering it could still be reached.
+                # Here it must simply never be an option.
+                {
+                    "guid": "guid-lossy",
+                    "title": "Arijit Singh - Tum Hi Ho",
+                    "indexerId": 1,
+                    "indexer": "TestIndexer",
+                    "size": 9_000_000,
+                    "seeders": 500,
+                },
+                {
+                    "guid": "guid-flac",
+                    "title": release_name,
+                    "indexerId": 1,
+                    "indexer": "TestIndexer",
+                    "size": 30_000_000,
+                    "seeders": 4,
+                },
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:9696/api/v1/search", method="POST", json={}
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/auth/login",
+            text="Ok.",
+            headers={"Set-Cookie": "SID=abc123; Path=/"},
+        )
+        content_dir = data_dir / "staging"
+        content_dir.mkdir(parents=True, exist_ok=True)
+        (content_dir / "Tum Hi Ho.flac").write_bytes(b"fLaC" + b"\x00" * 40)
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info", json=[]
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info",
+            json=[
+                {
+                    "name": release_name,
+                    "hash": "flachash",
+                    "save_path": str(content_dir),
+                }
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/info?hashes=flachash",
+            json=[{"progress": 1.0}],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8080/api/v2/torrents/files?hash=flachash",
+            json=[{"name": "Tum Hi Ho.flac", "size": 30_000_000}],
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+        assert (library_dir / request_row.final_file_path).exists()
+        assert request_row.final_file_path.endswith(".flac")
+
+    async def test_ytdlp_tier_declines_a_lossless_request_instead_of_serving_opus(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        """YouTube has no lossless source, so this tier can only ever answer honestly: no.
+
+        Nothing is registered for POST /downloads. Starting a download job -- the old
+        behaviour, which is exactly how an Opus file reached a FLAC request -- fails this test
+        on an unmatched request.
+        """
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user, desired_quality="lossless")
+        settings = _settings(tmp_path, YTDLP_SHIM_URL="http://localhost:8090")
+
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[
+                {
+                    "video_id": "dQw4w9WgXcQ",
+                    "title": "Arijit Singh - Tum Hi Ho",
+                    "uploader": "Arijit Singh Official",
+                    "duration_seconds": 259,
+                }
+            ],
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.AWAITING_QUALITY
+        assert request_row.final_file_path is None
+        attempts = await _attempts_of(session, request_row.id)
+        ytdlp_attempts = [a for a in attempts if a.backend == "ytdlp"]
+        assert (
+            ytdlp_attempts[-1].outcome == FulfillmentOutcome.DECLINED_LOSSY_ONLY.value
+        )
+        # The audit trail has to say why, specifically: "no lossless source on YouTube", not
+        # the generic "nothing matched" it would otherwise be indistinguishable from.
+        assert "no lossless source" in ytdlp_attempts[-1].detail
+        # And it must still record that the track WAS found, which is what makes going back to
+        # the requester worth doing at all.
+        assert ytdlp_attempts[-1].candidates_considered
+
+    async def test_nothing_found_at_all_still_fails_rather_than_asking(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        """No lossy alternative exists, so there is nothing to offer and nothing to ask."""
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user, desired_quality="lossless")
+        settings = _settings(tmp_path, YTDLP_SHIM_URL="http://localhost:8090")
+
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[{"video_id": "aaaaaaaaaaa", "title": "Completely Unrelated Video"}],
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FAILED
+        assert request_row.failure_reason
+
+
+class TestAcceptingALossyCopyResumesFulfillment:
+    async def test_accepted_lossy_request_completes_on_the_next_pass(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user, desired_quality="lossless")
+        library_dir = tmp_path / "library"
+        data_dir = tmp_path / "data"
+        settings = _settings(tmp_path, YTDLP_SHIM_URL="http://localhost:8090")
+
+        # Reusable: the same search runs again on the resumed pass, exactly as it would in
+        # production (fulfillment re-evaluates from scratch rather than resuming in place).
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[
+                {
+                    "video_id": "dQw4w9WgXcQ",
+                    "title": "Arijit Singh - Tum Hi Ho",
+                    "uploader": "Arijit Singh Official",
+                    "duration_seconds": 259,
+                }
+            ],
+            is_reusable=True,
+        )
+
+        await fulfill_request(session, request_row, settings)
+        assert request_row.status == RequestStatus.AWAITING_QUALITY
+
+        # The requester answers: a lossy copy is fine.
+        await accept_lossy_copy(session, request_row)
+        assert request_row.status == RequestStatus.APPROVED
+        assert request_row.lossy_accepted is True
+        # What they originally asked for is still on the record, not rewritten.
+        assert request_row.desired_quality == "lossless"
+
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads",
+            method="POST",
+            status_code=202,
+            json={"job_id": "job-1", "state": "running"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads/job-1",
+            method="GET",
+            json={
+                "job_id": "job-1",
+                "state": "completed",
+                "filename": "dQw4w9WgXcQ.opus",
+                "error": None,
+            },
+        )
+        staging_dir = data_dir / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "dQw4w9WgXcQ.opus").write_bytes(b"OggS" + b"\x00" * 40)
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+        assert (library_dir / request_row.final_file_path).exists()
+
+        # The shim is asked for "any" on the resumed pass, not the original "lossless" it
+        # would refuse outright -- an accepted downgrade has to reach the tier that serves it.
+        import json
+
+        download_posts = [
+            r
+            for r in httpx_mock.get_requests()
+            if str(r.url) == "http://localhost:8090/downloads" and r.method == "POST"
+        ]
+        assert len(download_posts) == 1
+        assert json.loads(download_posts[0].content)["quality"] == "any"
+
+
+class TestNonLosslessRequestsAreUnaffected:
+    """Everything that isn't an unanswered lossless request behaves exactly as it always did:
+    quality reorders candidates and never blocks a download."""
+
+    async def test_any_quality_request_takes_the_lossy_youtube_result(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user, desired_quality="any")
+        library_dir = tmp_path / "library"
+        data_dir = tmp_path / "data"
+        settings = _settings(tmp_path, YTDLP_SHIM_URL="http://localhost:8090")
+
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[{"video_id": "dQw4w9WgXcQ", "title": "Arijit Singh - Tum Hi Ho"}],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads",
+            method="POST",
+            status_code=202,
+            json={"job_id": "job-1", "state": "running"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:8090/downloads/job-1",
+            method="GET",
+            json={
+                "job_id": "job-1",
+                "state": "completed",
+                "filename": "dQw4w9WgXcQ.opus",
+            },
+        )
+        staging_dir = data_dir / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "dQw4w9WgXcQ.opus").write_bytes(b"OggS" + b"\x00" * 40)
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+        assert (library_dir / request_row.final_file_path).exists()
+
+    async def test_lossy_request_is_never_blocked_by_a_lossless_only_result(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        """Asking for lossy is a preference, not a refusal: a FLAC release still qualifies."""
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user, desired_quality="lossy")
+        library_dir = tmp_path / "library"
+        data_dir = tmp_path / "data"
+        settings = _settings(
+            tmp_path, SLSKD_URL="http://localhost:5030", SLSKD_API_KEY="slskdkey"
+        )
+
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches",
+            method="POST",
+            json={"id": "s1"},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1",
+            method="GET",
+            json={"isComplete": True},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/searches/s1/responses",
+            method="GET",
+            json=[
+                {
+                    "username": "someuser",
+                    "files": [
+                        {
+                            "filename": "Arijit Singh - Tum Hi Ho.flac",
+                            "size": 30_000_000,
+                            "bitRate": 1411,
+                        }
+                    ],
+                }
+            ],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/transfers/downloads/someuser",
+            method="POST",
+            json={},
+        )
+        httpx_mock.add_response(
+            url="http://localhost:5030/api/v0/transfers/downloads/someuser",
+            method="GET",
+            json={
+                "directories": [
+                    {
+                        "files": [
+                            {
+                                "filename": "Arijit Singh - Tum Hi Ho.flac",
+                                "state": "Completed, Succeeded",
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+        staging_dir = data_dir / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "Arijit Singh - Tum Hi Ho.flac").write_bytes(
+            b"fLaC" + b"\x00" * 40
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FULFILLED
+        assert (library_dir / request_row.final_file_path).exists()
+
+
+class TestWebhookFiresWhenAskingAboutQuality:
+    async def test_webhook_fires_with_awaiting_quality_status(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        """The one state where the requester has to act, so the one worth telling them about."""
+        session, user = fulfillment_db
+        user.webhook_url = "https://example.com/cadence-hook"
+        await session.commit()
+
+        request_row = await _make_request(session, user, desired_quality="lossless")
+        settings = _settings(tmp_path, YTDLP_SHIM_URL="http://localhost:8090")
+
+        httpx_mock.add_response(
+            url="http://localhost:8090/search",
+            method="POST",
+            json=[{"video_id": "dQw4w9WgXcQ", "title": "Arijit Singh - Tum Hi Ho"}],
+        )
+        httpx_mock.add_response(
+            url="https://example.com/cadence-hook", method="POST", json={"ok": True}
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        import json
+
+        webhook_calls = [
+            r
+            for r in httpx_mock.get_requests()
+            if str(r.url) == "https://example.com/cadence-hook"
+        ]
+        assert len(webhook_calls) == 1
+        body = json.loads(webhook_calls[0].content)
+        assert body["event"] == "awaiting_quality"
+        assert body["status"] == "awaiting_quality"
 
 
 class TestCrashRecoveryReEvaluation:

@@ -5,7 +5,16 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -29,6 +38,15 @@ class RequestStatus(str, enum.Enum):
     FULFILLED = "fulfilled"
     REJECTED = "rejected"
     FAILED = "failed"
+    # Not a failure and not a success: every tier was searched, matches for this exact track
+    # were found, and none of them were lossless. Delivering one of those lossy matches anyway
+    # would be a silent downgrade of what was asked for, and failing outright would throw away
+    # a file the requester may well be happy with, so the request parks here until the
+    # requester answers "accept a lossy copy?" (see app.services.requests.accept_lossy_copy).
+    #
+    # SQLAlchemy persists the enum's *name*, not its value, into a VARCHAR(16) column, so this
+    # member's name is exactly 16 characters by necessity, not by coincidence.
+    AWAITING_QUALITY = "awaiting_quality"
 
 
 class Request(Base):
@@ -63,11 +81,23 @@ class Request(Base):
         String(64), nullable=True
     )
 
-    # The requester's audio-quality preference ("any" | "mp3" | "flac"). A reordering signal
-    # for candidate selection, never a hard filter; server_default keeps rows from before this
-    # column (and any writer that doesn't set it) on the neutral value.
-    preferred_format: Mapped[str] = mapped_column(
-        String(8), nullable=False, default="any", server_default="any"
+    # The requester's audio-quality ask ("any" | "lossy" | "lossless"), deliberately generic
+    # rather than naming a container: it maps onto what the fulfillment tiers can actually
+    # promise, where a specific codec does not (YouTube can never hand back FLAC no matter how
+    # the ask is phrased). "any" and "lossy" are reordering signals only, never a hard filter;
+    # "lossless" IS a hard filter, because handing over a lossy file to someone who asked for
+    # lossless is a silent downgrade, not a near-enough match. server_default keeps rows from
+    # before this column (and any writer that doesn't set it) on the neutral value.
+    desired_quality: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="any", server_default="any"
+    )
+
+    # Set only by the requester's own explicit "a lossy copy is fine" answer to an
+    # AWAITING_QUALITY request. Kept as its own flag rather than rewriting desired_quality:
+    # what was originally asked for stays on the record, and the answer to the question is
+    # visibly a separate, later decision.
+    lossy_accepted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
     )
 
     status: Mapped[RequestStatus] = mapped_column(
@@ -137,6 +167,11 @@ class FulfillmentAttempt(Base):
 class FulfillmentOutcome(str, enum.Enum):
     SEARCHED_NO_CANDIDATES = "searched_no_candidates"
     SEARCHED_NO_QUALIFYING_CANDIDATE = "searched_no_qualifying_candidate"
+    # This tier found the right track but could only offer it lossy, against a request that
+    # asked for lossless. Distinct from SEARCHED_NO_QUALIFYING_CANDIDATE on purpose: "we found
+    # it, just not in the quality you asked for" is what makes asking the requester worthwhile,
+    # where "nothing here matches this song" does not.
+    DECLINED_LOSSY_ONLY = "declined_lossy_only"
     GRABBED = "grabbed"
     DOWNLOAD_STARTED = "download_started"
     DOWNLOAD_COMPLETED = "download_completed"
