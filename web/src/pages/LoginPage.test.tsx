@@ -28,13 +28,8 @@ function health(navidrome: { configured: boolean } | undefined): HealthResponse 
     version: "0.1.0",
     mode: "live",
     database_ok: true,
-    integrations: {
-      prowlarr: { configured: false, reachable: null },
-      qbittorrent: { configured: false, reachable: null },
-      slskd: { configured: false, reachable: null },
-      spotify: { configured: false, reachable: null },
-      ...(navidrome ? { navidrome: { configured: navidrome.configured, reachable: null } } : {}),
-    },
+    navidrome_login_available: navidrome?.configured ?? false,
+    spotify_search_available: false,
   };
 }
 

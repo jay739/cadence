@@ -116,6 +116,14 @@ export interface HealthResponse {
   version: string;
   mode: "demo" | "live";
   database_ok: boolean;
+  // Only the capability bits the pre-login and general-user UI need. Which indexer/download
+  // client exists, and whether any of them answer, is admin-only (see IntegrationsResponse).
+  navidrome_login_available: boolean;
+  spotify_search_available: boolean;
+}
+
+export interface IntegrationsResponse {
+  mode: "demo" | "live";
   integrations: Record<string, IntegrationStatus>;
 }
 

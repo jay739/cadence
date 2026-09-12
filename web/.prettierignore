@@ -1,0 +1,5 @@
+# Playwright output: gitignored, but prettier still walks it and fails a local
+# format:check after any e2e run.
+test-results/
+playwright-report/
+dist/

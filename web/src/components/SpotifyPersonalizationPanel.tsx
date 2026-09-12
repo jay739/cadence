@@ -82,7 +82,7 @@ export function SpotifyPersonalizationPanel({
   }
 
   if (!statusQuery.data?.connected) {
-    const spotifyConfigured = healthQuery.data?.integrations?.spotify?.configured ?? true;
+    const spotifyConfigured = healthQuery.data?.spotify_search_available ?? true;
     if (!spotifyConfigured) {
       return (
         <div className="empty-state spotify-connect-prompt">

@@ -31,7 +31,7 @@ class TestSettingsTakeEffectWithoutRestart:
         monkeypatch.delenv("PROWLARR_API_KEY", raising=False)
         headers = await make_admin_headers(app_client)
 
-        before = await app_client.get("/api/health")
+        before = await app_client.get("/api/health/integrations", headers=headers)
         assert before.json()["integrations"]["prowlarr"]["configured"] is False
 
         save_resp = await app_client.put(
@@ -44,7 +44,7 @@ class TestSettingsTakeEffectWithoutRestart:
         )
         assert save_resp.status_code == 200
 
-        after = await app_client.get("/api/health")
+        after = await app_client.get("/api/health/integrations", headers=headers)
         assert after.json()["integrations"]["prowlarr"]["configured"] is True
 
     async def test_slskd_configured_flips_true_after_ui_save_no_restart(
@@ -54,7 +54,7 @@ class TestSettingsTakeEffectWithoutRestart:
         monkeypatch.delenv("SLSKD_API_KEY", raising=False)
         headers = await make_admin_headers(app_client)
 
-        before = await app_client.get("/api/health")
+        before = await app_client.get("/api/health/integrations", headers=headers)
         assert before.json()["integrations"]["slskd"]["configured"] is False
 
         await app_client.put(
@@ -63,13 +63,13 @@ class TestSettingsTakeEffectWithoutRestart:
             headers=headers,
         )
 
-        after = await app_client.get("/api/health")
+        after = await app_client.get("/api/health/integrations", headers=headers)
         assert after.json()["integrations"]["slskd"]["configured"] is True
 
     async def test_health_reachable_reflects_db_saved_prowlarr_credentials(
         self, app_client, monkeypatch, httpx_mock
     ):
-        """Not just `configured`: `/api/health`'s live reachability probe must also use the
+        """Not just `configured`: the admin health route's live reachability probe must use the
         DB-saved value, since that is the boolean an operator actually watches to know
         fulfillment will work."""
         monkeypatch.delenv("PROWLARR_URL", raising=False)
@@ -89,7 +89,7 @@ class TestSettingsTakeEffectWithoutRestart:
             url=re.compile(r"http://localhost:19698/api/v1/system/status.*"),
             json={"version": "1.0"},
         )
-        resp = await app_client.get("/api/health")
+        resp = await app_client.get("/api/health/integrations", headers=headers)
         body = resp.json()
         assert body["integrations"]["prowlarr"]["configured"] is True
         assert body["integrations"]["prowlarr"]["reachable"] is True

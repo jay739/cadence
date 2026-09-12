@@ -27,7 +27,7 @@ export function LoginPage() {
       .get()
       .then((health) => {
         if (!cancelled) {
-          setNavidromeAvailable(health.integrations.navidrome?.configured ?? false);
+          setNavidromeAvailable(health.navidrome_login_available);
         }
       })
       .catch(() => {
