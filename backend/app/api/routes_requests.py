@@ -20,7 +20,9 @@ from app.schemas.request import (
     RequestOut,
 )
 from app.services.requests import (
+    RequestNotAwaitingQualityError,
     RequestNotFailedError,
+    accept_lossy_copy,
     approve_request,
     create_or_get_existing_request,
     get_request_by_id,
@@ -168,6 +170,43 @@ async def retry_failed_request(
             detail=f"Only a failed request can be retried (this one is {exc.args[0]!r})",
         ) from exc
     logger.info("request_retried", request_id=request_row.id, user_id=user.id)
+    worker = get_worker()
+    if worker is not None:
+        worker.notify()
+    return RequestOut.model_validate(request_row)
+
+
+@router.post("/{request_id}/accept-lossy", response_model=RequestOut)
+@limiter.limit(REQUEST_RETRY_RATE_LIMIT)
+async def accept_lossy_copy_for_request(
+    request: FastAPIRequest,
+    request_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> RequestOut:
+    """Answer "nothing lossless was found, accept a lossy copy?" with yes, and resume.
+
+    Owner-or-admin, like retry and the detail view: this is the requester answering a question
+    about their own request, not an admin decision. It shares retry's rate limit because it is
+    the same shape of action -- a user-initiated re-run of fulfillment for one request.
+    """
+    request_row = await get_request_by_id(session, request_id)
+    if request_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
+        )
+    _ensure_owner_or_admin(request_row, user)
+    try:
+        request_row = await accept_lossy_copy(session, request_row)
+    except RequestNotAwaitingQualityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Only a request waiting on a quality decision can accept a lossy copy "
+                f"(this one is {exc.args[0]!r})"
+            ),
+        ) from exc
+    logger.info("request_lossy_accepted", request_id=request_row.id, user_id=user.id)
     worker = get_worker()
     if worker is not None:
         worker.notify()

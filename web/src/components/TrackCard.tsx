@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PreferredFormat, TrackResult } from "../types/api";
+import type { DesiredQuality, TrackResult } from "../types/api";
 import "./TrackCard.css";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -24,16 +24,17 @@ function formatSize(bytes: number | null): string | null {
 
 interface TrackCardProps {
   track: TrackResult;
-  onRequest: (track: TrackResult, preferredFormat: PreferredFormat) => void;
+  onRequest: (track: TrackResult, desiredQuality: DesiredQuality) => void;
   requestState: "idle" | "requesting" | "requested" | "error";
 }
 
 export function TrackCard({ track, onRequest, requestState }: TrackCardProps) {
   const duration = formatDuration(track.duration_seconds);
   const size = formatSize(track.size_bytes);
-  // Quality is a preference, not a guarantee: it reorders download candidates server-side but
-  // never blocks the request when only another format exists.
-  const [preferredFormat, setPreferredFormat] = useState<PreferredFormat>("any");
+  // Lossless is the one ask that is a guarantee rather than a preference: if nothing lossless
+  // turns up anywhere, the request comes back and asks rather than quietly delivering a lossy
+  // file. "Any" and "Lossy" only reorder candidates server-side.
+  const [desiredQuality, setDesiredQuality] = useState<DesiredQuality>("any");
 
   return (
     <li className="track-card">
@@ -63,19 +64,19 @@ export function TrackCard({ track, onRequest, requestState }: TrackCardProps) {
         <select
           className="track-card__format"
           aria-label="Preferred quality"
-          value={preferredFormat}
+          value={desiredQuality}
           disabled={requestState === "requesting" || requestState === "requested"}
-          onChange={(e) => setPreferredFormat(e.target.value as PreferredFormat)}
+          onChange={(e) => setDesiredQuality(e.target.value as DesiredQuality)}
         >
           <option value="any">Any quality</option>
-          <option value="mp3">MP3</option>
-          <option value="flac">FLAC</option>
+          <option value="lossy">Lossy (smaller)</option>
+          <option value="lossless">Lossless only</option>
         </select>
         <button
           type="button"
           className="button button--primary track-card__action"
           disabled={requestState === "requesting" || requestState === "requested"}
-          onClick={() => onRequest(track, preferredFormat)}
+          onClick={() => onRequest(track, desiredQuality)}
         >
           {requestState === "requesting" && "Requesting…"}
           {requestState === "requested" && "Requested"}

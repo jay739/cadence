@@ -89,7 +89,7 @@ async def create_or_get_existing_request(
         source=body.source,
         source_id=body.source_id,
         musicbrainz_recording_id=body.musicbrainz_recording_id,
-        preferred_format=body.preferred_format,
+        desired_quality=body.desired_quality,
         dedupe_key=dedupe_key,
         status=RequestStatus.PENDING,
     )
@@ -173,6 +173,39 @@ class RequestNotFailedError(Exception):
     correct but not obviously a "retry" action), retry is guarded: it should read as "try this
     specific failure again", not as a second way to approve a pending request.
     """
+
+
+class RequestNotAwaitingQualityError(Exception):
+    """Accepting a lossy copy only means anything for a request that is actually asking.
+
+    Guarded the same way retry is: this is an answer to a specific question Cadence asked, not
+    a general "downgrade this request" switch an owner can flip at any point in its life.
+    """
+
+
+async def accept_lossy_copy(session: AsyncSession, request_row: Request) -> Request:
+    """Answer an AWAITING_QUALITY request with "a lossy copy is fine", and resume fulfillment.
+
+    Back to APPROVED rather than straight to DOWNLOADING: the worker owns claiming and running
+    jobs, and going through the same queue state as any other approved request means the resumed
+    attempt is picked up, locked, and crash-recovered by exactly the existing machinery.
+
+    `desired_quality` is deliberately left as the requester originally set it. The record still
+    says lossless was wanted, `lossy_accepted` says they agreed to settle, and fulfillment reads
+    the two together -- so the next pass still *prefers* lossless, it simply no longer refuses
+    everything else.
+    """
+    if request_row.status != RequestStatus.AWAITING_QUALITY:
+        raise RequestNotAwaitingQualityError(request_row.status.value)
+    request_row.lossy_accepted = True
+    request_row.status = RequestStatus.APPROVED
+    # Cleared for the same reason retry clears it: a reason left over from the pass that asked
+    # the question would be stale the moment a fresh attempt is in flight, and the full history
+    # survives in the FulfillmentAttempt audit trail regardless.
+    request_row.failure_reason = None
+    await session.commit()
+    await session.refresh(request_row)
+    return request_row
 
 
 async def retry_request(session: AsyncSession, request_row: Request) -> Request:

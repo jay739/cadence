@@ -52,13 +52,26 @@ describe("TrackCard", () => {
     expect(onRequest).toHaveBeenCalledWith(baseTrack, "any");
   });
 
-  it("passes the chosen quality preference through to onRequest", async () => {
+  it("passes the chosen quality through to onRequest", async () => {
     const onRequest = vi.fn();
     const user = userEvent.setup();
     render(<TrackCard track={baseTrack} onRequest={onRequest} requestState="idle" />);
-    await user.selectOptions(screen.getByRole("combobox", { name: /preferred quality/i }), "flac");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: /preferred quality/i }),
+      "lossless",
+    );
     await user.click(screen.getByRole("button", { name: /request/i }));
-    expect(onRequest).toHaveBeenCalledWith(baseTrack, "flac");
+    expect(onRequest).toHaveBeenCalledWith(baseTrack, "lossless");
+  });
+
+  it("offers quality in terms the fulfillment tiers can actually promise", () => {
+    // Not container names: "FLAC" was a promise the YouTube tier could never keep, which is
+    // how a FLAC request came back as an Opus file.
+    render(<TrackCard track={baseTrack} onRequest={vi.fn()} requestState="idle" />);
+    const options = screen
+      .getAllByRole("option")
+      .map((option) => (option as HTMLOptionElement).value);
+    expect(options).toEqual(["any", "lossy", "lossless"]);
   });
 
   it("disables the button and shows progress while requesting", () => {

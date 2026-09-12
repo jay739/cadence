@@ -11,6 +11,7 @@ describe("StatusBadge", () => {
     ["fulfilled", "Downloaded"],
     ["rejected", "Declined"],
     ["failed", "Download failed"],
+    ["awaiting_quality", "Nothing lossless found, your call"],
   ])("renders the correct label for %s", (status, expectedLabel) => {
     render(<StatusBadge status={status} />);
     expect(screen.getByText(expectedLabel)).toBeInTheDocument();

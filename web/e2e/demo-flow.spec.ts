@@ -131,6 +131,44 @@ test.describe("Demo mode: request history and fulfillment visibility", () => {
   });
 });
 
+test.describe("Demo mode: nothing lossless found", () => {
+  test("a lossless request that found only lossy copies asks, and can be answered", async ({
+    page,
+  }) => {
+    // The seeded demo queue includes one request parked on exactly this question (see
+    // backend/app/demo/data.py), because it is the one request state that goes nowhere at all
+    // until the requester answers it.
+    await login(page, USER_EMAIL, USER_PASSWORD);
+    await page.goto("/requests");
+
+    const awaitingRow = page.locator(".request-row", { hasText: "Nothing lossless found" }).first();
+    await expect(awaitingRow).toBeVisible();
+
+    // The question, and the reason behind it, are on the request's own page.
+    await awaitingRow.getByRole("link").click();
+    await expect(page).toHaveURL(/\/requests\/[0-9a-f-]+$/);
+    await expect(page.getByRole("heading", { name: "Nothing lossless found" })).toBeVisible();
+    await expect(page.getByText(/never has a lossless source/i)).toBeVisible();
+    // What it originally asked for is still on the record, not rewritten to match what it got.
+    await expect(page.getByText("Lossless", { exact: true })).toBeVisible();
+    // The audit trail says a tier found the track and declined it, rather than failing.
+    await expect(page.getByText("declined lossy only")).toBeVisible();
+
+    await page.getByRole("button", { name: "Accept a lossy copy" }).click();
+
+    // Answered: the request rejoins the fulfillment queue, and the question is gone. (Demo
+    // mode runs no fulfillment worker, so it stays queued rather than progressing further,
+    // which is exactly what makes this a stable assertion.)
+    await expect(page.getByText("Approved, download queued")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Accept a lossy copy" })).toHaveCount(0);
+    await expect(page.getByText("(lossy copy accepted)")).toBeVisible();
+
+    // And it survives a reload: a real round trip through the API, not local state.
+    await page.reload();
+    await expect(page.getByText("Approved, download queued")).toBeVisible();
+  });
+});
+
 test.describe("Tab navigation", () => {
   test("navigating between tabs lands on the right route and shows the right content", async ({
     page,

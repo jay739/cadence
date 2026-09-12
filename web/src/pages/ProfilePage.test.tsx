@@ -66,7 +66,8 @@ function stats(overrides: Partial<RequestStatusCounts> = {}): RequestStatusCount
     fulfilled: 3,
     rejected: 4,
     failed: 6,
-    total: 21,
+    awaiting_quality: 7,
+    total: 28,
     ...overrides,
   };
 }
@@ -105,13 +106,18 @@ describe("ProfilePage", () => {
     renderProfilePage();
 
     const total = await screen.findByText("Total");
-    expect(within(total.closest<HTMLElement>(".stat-tile")!).getByText("21")).toBeInTheDocument();
+    expect(within(total.closest<HTMLElement>(".stat-tile")!).getByText("28")).toBeInTheDocument();
 
     const pending = screen.getByText("Pending").closest<HTMLElement>(".stat-tile")!;
     expect(within(pending).getByText("2")).toBeInTheDocument();
 
     const failed = screen.getByText("Failed").closest<HTMLElement>(".stat-tile")!;
     expect(within(failed).getByText("6")).toBeInTheDocument();
+
+    // Requests parked on a lossless-or-lossy decision get their own tile: they are the only
+    // count on this page that is a to-do item rather than a record of what happened.
+    const awaiting = screen.getByText("Needs your call").closest<HTMLElement>(".stat-tile")!;
+    expect(within(awaiting).getByText("7")).toBeInTheDocument();
   });
 
   it("shows an error message if stats fail to load", async () => {

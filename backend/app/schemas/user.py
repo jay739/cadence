@@ -76,7 +76,9 @@ class RequestStatusCounts(BaseModel):
     fulfilled: int
     rejected: int
     failed: int
+    awaiting_quality: int
     total: int
+
 
 class WebhookUrlIn(BaseModel):
     """PATCH body for setting or clearing the caller's own webhook URL.
@@ -105,4 +107,3 @@ class WebhookUrlIn(BaseModel):
                 "webhook_url must be a valid http:// or https:// URL with a host"
             )
         return v
-

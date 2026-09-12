@@ -84,7 +84,7 @@ async def test_run_migrations_stamps_pre_alembic_database(tmp_path):
 
     async with get_engine().connect() as conn:
         columns = await conn.run_sync(_request_columns)
-    assert "preferred_format" in columns
+    assert "desired_quality" in columns
 
     # The stamp must not have touched or recreated any pre-existing table's data.
     async with get_engine().connect() as conn:

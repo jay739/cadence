@@ -67,6 +67,9 @@ class TestStats:
         downloading = await app_client.post(
             "/api/requests", json=_payload(source_id="s-downloading"), headers=headers
         )
+        awaiting = await app_client.post(
+            "/api/requests", json=_payload(source_id="s-awaiting"), headers=headers
+        )
         assert pending.status_code == 201
 
         admin_headers = await make_admin_headers(app_client)
@@ -83,6 +86,7 @@ class TestStats:
         await _force_status(fulfilled.json()["id"], RequestStatus.FULFILLED)
         await _force_status(failed.json()["id"], RequestStatus.FAILED)
         await _force_status(downloading.json()["id"], RequestStatus.DOWNLOADING)
+        await _force_status(awaiting.json()["id"], RequestStatus.AWAITING_QUALITY)
 
         resp = await app_client.get("/api/users/me/stats", headers=headers)
         assert resp.status_code == 200
@@ -93,7 +97,8 @@ class TestStats:
             "fulfilled": 1,
             "rejected": 1,
             "failed": 1,
-            "total": 6,
+            "awaiting_quality": 1,
+            "total": 7,
         }
 
     async def test_only_counts_the_caller_s_own_requests(self, app_client):
@@ -123,6 +128,7 @@ class TestStats:
             "fulfilled": 0,
             "rejected": 0,
             "failed": 0,
+            "awaiting_quality": 0,
             "total": 0,
         }
 

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from app.services.scoring import (
+    QUALITY_LOSSLESS,
+    QUALITY_LOSSY,
+    QUALITY_UNKNOWN,
     ScoredCandidate,
     best_qualifying_candidate,
+    candidate_quality,
     extract_extension,
     format_rank,
-    matches_preferred_format,
+    matches_desired_quality,
     qualifying_candidates_ranked,
     rank_candidates,
     title_artist_similarity,
@@ -130,29 +134,49 @@ class TestCandidateRankingAndQualification:
         assert ranked[0] is best_qualifying_candidate(candidates)
 
 
-class TestFormatPreference:
-    def test_any_matches_everything(self):
-        assert matches_preferred_format("Artist - Title.mp3", "any") is True
-        assert matches_preferred_format("whatever", "any") is True
+class TestCandidateQuality:
+    def test_extension_decides_when_it_is_a_known_one(self):
+        assert candidate_quality("Artist - Title.flac") == QUALITY_LOSSLESS
+        assert candidate_quality("Artist - Title.mp3") == QUALITY_LOSSY
+        assert candidate_quality("Artist - Title.opus") == QUALITY_LOSSY
+        assert candidate_quality("Artist - Title.alac") == QUALITY_LOSSLESS
 
-    def test_extension_match_wins_over_tokens(self):
-        assert matches_preferred_format("Artist - Title.flac", "flac") is True
-        assert matches_preferred_format("Artist - Title.mp3", "flac") is False
-        # A known extension is authoritative even when the name also carries other tokens.
-        assert matches_preferred_format("Artist - Title FLAC rip.mp3", "flac") is False
+    def test_extension_beats_a_contradicting_token_in_the_name(self):
+        # The file on offer is an mp3, whatever the rest of the name claims about the rip.
+        assert candidate_quality("Artist - Title FLAC rip.mp3") == QUALITY_LOSSY
 
-    def test_extensionless_release_title_matches_by_token(self):
+    def test_extensionless_release_title_is_classified_by_token(self):
         # Prowlarr release titles rarely have an extension but usually carry a format marker.
         assert (
-            matches_preferred_format("Artist - Title (2020) [FLAC] [WEB]", "flac")
-            is True
+            candidate_quality("Artist - Title (2020) [FLAC] [WEB]") == QUALITY_LOSSLESS
         )
-        assert (
-            matches_preferred_format("Artist - Title (2020) 320 MP3", "flac") is False
-        )
-        assert matches_preferred_format("Artist - Title (2020) 320 MP3", "mp3") is True
+        assert candidate_quality("Artist - Title (2020) 320 MP3") == QUALITY_LOSSY
+        assert candidate_quality("Artist - Title (2020) [V0]") == QUALITY_LOSSY
+
+    def test_a_name_with_no_format_signal_at_all_is_unknown(self):
+        # Not guessed in either direction: "unknown" is what makes a lossless request able to
+        # refuse it honestly rather than hoping.
+        assert candidate_quality("Artist - Title (2020) [WEB]") == QUALITY_UNKNOWN
+        assert candidate_quality("Artist - Title") == QUALITY_UNKNOWN
+
+
+class TestDesiredQualityPreference:
+    def test_any_matches_everything(self):
+        assert matches_desired_quality("Artist - Title.mp3", "any") is True
+        assert matches_desired_quality("whatever", "any") is True
+
+    def test_lossless_ask_matches_only_lossless(self):
+        assert matches_desired_quality("Artist - Title.flac", "lossless") is True
+        assert matches_desired_quality("Artist - Title.mp3", "lossless") is False
+        assert matches_desired_quality("Artist - Title", "lossless") is False
+
+    def test_lossy_ask_matches_only_lossy(self):
+        assert matches_desired_quality("Artist - Title.mp3", "lossy") is True
+        assert matches_desired_quality("Artist - Title.flac", "lossy") is False
 
     def test_preference_reorders_but_never_disqualifies(self):
+        # Without require_lossless in play, quality is exactly what it always was: a
+        # tie-breaker. A lone non-preferred candidate is still used rather than failing.
         flac = ScoredCandidate(
             identifier="flac",
             raw_name="Artist - Title.flac",
@@ -161,6 +185,7 @@ class TestFormatPreference:
             size_bytes=100,
             extra={},
             matches_preference=True,
+            quality=QUALITY_LOSSLESS,
         )
         mp3 = ScoredCandidate(
             identifier="mp3",
@@ -170,10 +195,9 @@ class TestFormatPreference:
             size_bytes=100,
             extra={},
             matches_preference=False,
+            quality=QUALITY_LOSSY,
         )
-        # The preferred format wins despite lower similarity: both already qualify.
         assert best_qualifying_candidate([mp3, flac]).identifier == "flac"
-        # A lone non-matching candidate is still used rather than failing the request.
         assert best_qualifying_candidate([mp3]).identifier == "mp3"
 
     def test_any_preference_keeps_similarity_ordering(self):
@@ -194,6 +218,53 @@ class TestFormatPreference:
             extra={},
         )
         assert best_qualifying_candidate([b, a]).identifier == "a"
+
+
+class TestLosslessRequirementFilters:
+    """The one place quality removes candidates instead of reordering them.
+
+    Every assertion here fails against the pre-change behaviour, where a format preference
+    could only ever sort -- which is how a request for FLAC came back as an Opus file.
+    """
+
+    def _cand(self, identifier: str, name: str, quality: str, similarity: float = 0.9):
+        return ScoredCandidate(
+            identifier=identifier,
+            raw_name=name,
+            similarity=similarity,
+            format_score=1,
+            size_bytes=100,
+            extra={},
+            quality=quality,
+        )
+
+    def test_lossy_candidates_are_excluded_outright_when_lossless_is_required(self):
+        lossy = self._cand(
+            "lossy", "Artist - Title.mp3", QUALITY_LOSSY, similarity=0.99
+        )
+        assert qualifying_candidates_ranked([lossy]) == [lossy]
+        assert qualifying_candidates_ranked([lossy], require_lossless=True) == []
+
+    def test_unknown_quality_is_excluded_too(self):
+        # A release title that never said what it is cannot satisfy a request that asked for a
+        # guarantee, however well it matches the track.
+        unknown = self._cand("unknown", "Artist - Title (2020)", QUALITY_UNKNOWN)
+        assert qualifying_candidates_ranked([unknown], require_lossless=True) == []
+
+    def test_a_lossless_candidate_survives_and_still_ranks_normally(self):
+        lossless_weak = self._cand(
+            "flac-weak", "Artist - Title.flac", QUALITY_LOSSLESS, similarity=0.6
+        )
+        lossless_strong = self._cand(
+            "flac-strong", "Artist - Title.flac", QUALITY_LOSSLESS, similarity=0.95
+        )
+        lossy_best = self._cand(
+            "mp3", "Artist - Title.mp3", QUALITY_LOSSY, similarity=0.99
+        )
+        ranked = qualifying_candidates_ranked(
+            [lossy_best, lossless_weak, lossless_strong], require_lossless=True
+        )
+        assert [c.identifier for c in ranked] == ["flac-strong", "flac-weak"]
 
 
 def _cand(identifier: str, *, similarity: float, seeders: int | None, name: str = "x"):
