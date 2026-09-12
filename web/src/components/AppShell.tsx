@@ -26,8 +26,10 @@ export function AppShell() {
           <NavLink to="/profile" className="shell__nav-link">
             Profile
           </NavLink>
+          {/* `end`, or Approval queue stays active on /admin/settings too: NavLink marks a
+              link active for any path starting with `to`, and Settings lives under /admin. */}
           {user?.role === "admin" && (
-            <NavLink to="/admin" className="shell__nav-link">
+            <NavLink to="/admin" end className="shell__nav-link">
               Approval queue
             </NavLink>
           )}

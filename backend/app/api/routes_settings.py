@@ -36,6 +36,7 @@ from app.schemas.settings import (
 from app.services.settings_store import (
     FIELD_REGISTRY,
     INTEGRATIONS,
+    get_effective_settings,
     get_masked_settings_view,
     get_source_preference_view,
     set_source_preference,
@@ -230,34 +231,52 @@ async def test_connection(
     integration: str,
     body: dict[str, str | None],
     _admin: User = Depends(require_admin),
+    settings: Settings = Depends(get_app_settings),
+    session: AsyncSession = Depends(get_db),
 ) -> TestConnectionOut:
-    """Test a connection using the admin-supplied values directly (not necessarily saved yet).
+    """Test a connection, using whatever the admin has typed and falling back to the value
+    already in effect for anything they haven't.
 
     Accepts a raw JSON body keyed by field name (e.g. {"prowlarr_url": "...",
     "prowlarr_api_key": "..."}) so an admin can validate credentials before saving them. Makes
     exactly one outbound call via the SSRF-hardened SafeHttpClient per the mission's carried-
     over constraint; never persists anything regardless of outcome.
+
+    The fallback is not a convenience, it is what makes the button work at all on a normally
+    configured install. Secrets are deliberately never sent to the browser (only a mask), and
+    an env-sourced field is rendered disabled, so for those two cases the client has nothing
+    it *could* put in the body: testing an env-configured Prowlarr always reported "URL and
+    API key are both required" because the request genuinely carried neither.
     """
     if integration not in _VALID_INTEGRATIONS:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Unknown integration"
         )
 
+    effective = await get_effective_settings(session, settings)
+
+    def field(name: str) -> str | None:
+        """Typed-in value if the admin supplied a non-blank one, else what's in effect."""
+        supplied = body.get(name)
+        if supplied is not None and supplied.strip():
+            return supplied
+        return effective.get(name)
+
     if integration == "prowlarr":
         ok, detail = await test_prowlarr(
-            body.get("prowlarr_url"), body.get("prowlarr_api_key")
+            field("prowlarr_url"), field("prowlarr_api_key")
         )
     elif integration == "qbittorrent":
         ok, detail = await test_qbittorrent(
-            body.get("qbittorrent_url"),
-            body.get("qbittorrent_username"),
-            body.get("qbittorrent_password"),
+            field("qbittorrent_url"),
+            field("qbittorrent_username"),
+            field("qbittorrent_password"),
         )
     elif integration == "slskd":
-        ok, detail = await test_slskd(body.get("slskd_url"), body.get("slskd_api_key"))
+        ok, detail = await test_slskd(field("slskd_url"), field("slskd_api_key"))
     else:
         ok, detail = await test_spotify(
-            body.get("spotify_client_id"), body.get("spotify_client_secret")
+            field("spotify_client_id"), field("spotify_client_secret")
         )
 
     return TestConnectionOut(ok=ok, detail=detail)
