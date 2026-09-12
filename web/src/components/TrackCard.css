@@ -108,3 +108,22 @@
   background: var(--color-bg-inset);
   color: var(--color-text-muted);
 }
+
+/* Appended at the end of the file on purpose: the library badge is an additive feature and
+ * keeping its rule out of the existing block above keeps concurrent edits to this stylesheet
+ * trivial to merge. Matches .track-card__source-badge's pill geometry so the two sit together
+ * in the title row, but takes the app-wide "fulfilled" status colour (the same one StatusBadge
+ * uses for a completed request) because it means the same thing: this track is already here. */
+.track-card__library-badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-status-fulfilled);
+  border: 1px solid color-mix(in srgb, var(--color-status-fulfilled) 45%, transparent);
+  background: color-mix(in srgb, var(--color-status-fulfilled) 12%, transparent);
+  border-radius: 999px;
+  padding: 1px var(--space-2);
+  flex-shrink: 0;
+}

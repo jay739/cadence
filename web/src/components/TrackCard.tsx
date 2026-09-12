@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PreferredFormat, TrackResult } from "../types/api";
+import type { LibraryMatch, PreferredFormat, TrackResult } from "../types/api";
 import "./TrackCard.css";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -26,9 +26,12 @@ interface TrackCardProps {
   track: TrackResult;
   onRequest: (track: TrackResult, preferredFormat: PreferredFormat) => void;
   requestState: "idle" | "requesting" | "requested" | "error";
+  // The Navidrome recording this track was confidently matched to, if any. Optional so the
+  // call sites that have no library lookup available render exactly as before.
+  libraryMatch?: LibraryMatch | null;
 }
 
-export function TrackCard({ track, onRequest, requestState }: TrackCardProps) {
+export function TrackCard({ track, onRequest, requestState, libraryMatch }: TrackCardProps) {
   const duration = formatDuration(track.duration_seconds);
   const size = formatSize(track.size_bytes);
   // Quality is a preference, not a guarantee: it reorders download candidates server-side but
@@ -48,6 +51,18 @@ export function TrackCard({ track, onRequest, requestState }: TrackCardProps) {
         <div className="track-card__title-row">
           <span className="track-card__title">{track.title}</span>
           <span className="track-card__source-badge">{SOURCE_LABEL[track.source]}</span>
+          {libraryMatch && (
+            <span
+              className="track-card__library-badge"
+              // Naming what was matched is what makes the claim checkable: the whole risk of
+              // this badge is talking someone out of a request they actually wanted.
+              title={`Matched "${libraryMatch.title}" by ${libraryMatch.artist}${
+                libraryMatch.album ? ` on ${libraryMatch.album}` : ""
+              }`}
+            >
+              In your library
+            </span>
+          )}
         </div>
         <div className="track-card__artist">{track.artist}</div>
         <div className="track-card__meta mono">

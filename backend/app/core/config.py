@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     # they already have. Unset means local accounts only, which stays the default.
     navidrome_url: str | None = Field(default=None, alias="NAVIDROME_URL")
 
+    # An optional Navidrome service account, used only to ask whether a track is already in the
+    # library before someone requests it (app.services.navidrome_library). This cannot reuse the
+    # requesting user's own credential: Cadence never stores a Navidrome password, so there is
+    # nothing to replay outside a login request. Leaving these unset disables the
+    # already-in-library check and nothing else -- search, login and fulfillment are unaffected.
+    # An ordinary (non-admin) Navidrome account is sufficient; the check only ever reads.
+    navidrome_admin_user: str | None = Field(default=None, alias="NAVIDROME_ADMIN_USER")
+    navidrome_admin_password: str | None = Field(
+        default=None, alias="NAVIDROME_ADMIN_PASSWORD"
+    )
+
     # --- Spotify (Client Credentials, app-only) ---
     spotify_client_id: str | None = Field(default=None, alias="SPOTIFY_CLIENT_ID")
     spotify_client_secret: str | None = Field(
@@ -228,6 +239,20 @@ class Settings(BaseSettings):
     @property
     def spotify_configured(self) -> bool:
         return bool(self.spotify_client_id and self.spotify_client_secret)
+
+    @property
+    def navidrome_library_configured(self) -> bool:
+        """Whether the already-in-library check can run at all.
+
+        Separate from `navidrome_url` being set: Navidrome can be a perfectly good login backend
+        with no service account configured, in which case sign-in works and library badges
+        simply never appear.
+        """
+        return bool(
+            self.navidrome_url
+            and self.navidrome_admin_user
+            and self.navidrome_admin_password
+        )
 
 
 @lru_cache

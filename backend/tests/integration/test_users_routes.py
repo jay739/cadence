@@ -162,6 +162,87 @@ class TestUpdateAvatar:
         assert resp.json()["avatar_url"] is None
 
 
+class TestResolvedAvatar:
+    """`avatar` is the picture to render; `avatar_url` stays the raw stored value.
+
+    Keeping both on the wire is what lets the profile form round-trip "not set" while the rest
+    of the UI always has something to draw.
+    """
+
+    async def test_a_new_account_gets_a_generated_doodle(self, app_client):
+        headers = await register_and_login(
+            app_client, "doodle@example.com", "a-strong-password-1"
+        )
+        body = (await app_client.get("/api/auth/me", headers=headers)).json()
+
+        assert body["avatar_url"] is None
+        assert body["avatar_source"] == "generated"
+        assert body["avatar"].startswith("data:image/svg+xml;base64,")
+
+    async def test_setting_an_avatar_url_takes_precedence_over_the_doodle(
+        self, app_client
+    ):
+        headers = await register_and_login(
+            app_client, "doodle2@example.com", "a-strong-password-1"
+        )
+        resp = await app_client.patch(
+            "/api/users/me/avatar",
+            json={"avatar_url": "https://example.com/me.png"},
+            headers=headers,
+        )
+
+        assert resp.json()["avatar"] == "https://example.com/me.png"
+        assert resp.json()["avatar_source"] == "url"
+
+    async def test_clearing_the_url_falls_back_to_the_same_doodle_as_before(
+        self, app_client
+    ):
+        # The doodle is seeded on the user id, so it must be identical before and after -- a
+        # user who sets and then clears a picture gets their own avatar back, not a new one.
+        headers = await register_and_login(
+            app_client, "doodle3@example.com", "a-strong-password-1"
+        )
+        original = (await app_client.get("/api/auth/me", headers=headers)).json()[
+            "avatar"
+        ]
+        await app_client.patch(
+            "/api/users/me/avatar",
+            json={"avatar_url": "https://example.com/me.png"},
+            headers=headers,
+        )
+        cleared = await app_client.patch(
+            "/api/users/me/avatar", json={"avatar_url": ""}, headers=headers
+        )
+
+        assert cleared.json()["avatar_source"] == "generated"
+        assert cleared.json()["avatar"] == original
+
+    async def test_different_users_get_different_doodles(self, app_client):
+        first = await register_and_login(
+            app_client, "doodle4@example.com", "a-strong-password-1"
+        )
+        second = await register_and_login(
+            app_client, "doodle5@example.com", "a-strong-password-1"
+        )
+        first_avatar = (await app_client.get("/api/auth/me", headers=first)).json()[
+            "avatar"
+        ]
+        second_avatar = (await app_client.get("/api/auth/me", headers=second)).json()[
+            "avatar"
+        ]
+        assert first_avatar != second_avatar
+
+    async def test_navidrome_accounts_also_get_a_doodle(self, app_client):
+        # Navidrome exposes no per-user picture (see app.services.avatars), so a Navidrome-backed
+        # account falls through to the generated doodle exactly like a local one.
+        headers = await make_navidrome_headers(app_client)
+        body = (await app_client.get("/api/auth/me", headers=headers)).json()
+
+        assert body["auth_provider"] == "navidrome"
+        assert body["avatar_source"] == "generated"
+        assert body["avatar"].startswith("data:image/svg+xml;base64,")
+
+
 class TestUpdateEmail:
     async def test_requires_auth(self, app_client):
         resp = await app_client.patch(

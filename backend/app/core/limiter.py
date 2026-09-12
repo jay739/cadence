@@ -38,6 +38,10 @@ SEARCH_RATE_LIMIT = "30/minute"
 # in-flight source tasks server-side, so the real upstream cost per abandoned stream is low).
 # 60/minute still respects MusicBrainz's own 1-req/sec ceiling as the effective upper bound.
 SEARCH_STREAM_RATE_LIMIT = "60/minute"
+# The already-in-library check is issued once per rendered page of search results, so it tracks
+# the streaming search budget rather than the batch one. Its upstream cost is a handful of
+# calls to the operator's own local Navidrome, not a third-party API.
+LIBRARY_CHECK_RATE_LIMIT = "60/minute"
 REQUEST_CREATE_RATE_LIMIT = "20/minute"
 # Tighter than create: a single retry can fan out across all three fulfillment tiers, each
 # trying up to FULFILLMENT_MAX_CANDIDATE_ATTEMPTS candidates, so the real external-call cost

@@ -6,12 +6,23 @@ export type UserRole = "user" | "admin";
 
 export type AuthProvider = "local" | "navidrome";
 
+// Which tier the rendered avatar came from. "navidrome" exists in the contract but is never
+// produced today: Navidrome has no per-user avatar to fetch (see backend/app/services/avatars.py
+// for the probe that established that), so accounts without an avatar_url get "generated".
+export type AvatarSource = "url" | "navidrome" | "generated";
+
 export interface User {
   id: string;
   email: string;
   role: UserRole;
   auth_provider: AuthProvider;
+  // The raw stored value, null when unset. This is form state for the profile page; render
+  // `avatar` instead.
   avatar_url: string | null;
+  // The picture to actually render: always populated, either avatar_url or an inline SVG
+  // doodle as a data: URI. Generated server-side so it needs no network and cannot fail.
+  avatar: string;
+  avatar_source: AvatarSource;
   // Only ever set for a "navidrome" account: where to send that user to manage their own
   // password, since Cadence never stores one for them.
   navidrome_url: string | null;
@@ -69,7 +80,12 @@ export interface MultiSearchResponse {
 }
 
 export type RequestStatus =
-  "pending" | "approved" | "downloading" | "fulfilled" | "rejected" | "failed";
+  | "pending"
+  | "approved"
+  | "downloading"
+  | "fulfilled"
+  | "rejected"
+  | "failed";
 
 export interface RequestRecord {
   id: string;
@@ -199,4 +215,31 @@ export interface SpotifyPlaylistSummary {
 
 export interface SpotifyPlaylistsResponse {
   playlists: SpotifyPlaylistSummary[];
+}
+
+// --- Already-in-library check (mirrors backend/app/schemas/library.py) ---
+
+export interface LibraryCheckItem {
+  // Whatever the caller uses to index its own results; echoed back untouched. The search UI
+  // sends `${source}:${source_id}`.
+  key: string;
+  title: string;
+  artist: string;
+}
+
+export interface LibraryMatch {
+  key: string;
+  navidrome_id: string;
+  title: string;
+  artist: string;
+  album: string | null;
+}
+
+export interface LibraryCheckResponse {
+  // False when no Navidrome service account is configured, in demo mode, or when every lookup
+  // failed. Render nothing in that case: the answer is "unknown", not "not in your library".
+  // A key missing from `matches` while `available` is true likewise only means "not confidently
+  // found" — matching is deliberately conservative, so a miss is cheap and a false hit is not.
+  available: boolean;
+  matches: LibraryMatch[];
 }

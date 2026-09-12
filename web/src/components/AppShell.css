@@ -79,6 +79,17 @@
   gap: var(--space-3);
 }
 
+.shell__avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  /* The generated doodle is drawn on its own opaque ground, so a hairline keeps it from
+     floating against the header rather than providing the contrast itself. */
+  border: 1px solid var(--color-line);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
 .shell__email {
   font-family: var(--font-mono);
   font-size: 0.78rem;
