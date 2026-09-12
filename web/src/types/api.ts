@@ -80,12 +80,7 @@ export interface MultiSearchResponse {
 }
 
 export type RequestStatus =
-  | "pending"
-  | "approved"
-  | "downloading"
-  | "fulfilled"
-  | "rejected"
-  | "failed";
+  "pending" | "approved" | "downloading" | "fulfilled" | "rejected" | "failed";
 
 export interface RequestRecord {
   id: string;
@@ -239,7 +234,7 @@ export interface LibraryCheckResponse {
   // False when no Navidrome service account is configured, in demo mode, or when every lookup
   // failed. Render nothing in that case: the answer is "unknown", not "not in your library".
   // A key missing from `matches` while `available` is true likewise only means "not confidently
-  // found" — matching is deliberately conservative, so a miss is cheap and a false hit is not.
+  // found", because matching is deliberately conservative: a miss is cheap, a false hit is not.
   available: boolean;
   matches: LibraryMatch[];
 }
