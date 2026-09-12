@@ -27,5 +27,13 @@ All notable changes to this project are documented here. Format loosely follows
   registration. Tokens are encrypted at rest with the same key used for other integration
   secrets.
 - Dependabot configuration for the Python backend, npm web client, and GitHub Actions.
+- Already-in-library check: search results are flagged "In your library" when the track is
+  already in Navidrome, so nobody queues a download of something they already own. Needs an
+  optional Navidrome service account (`NAVIDROME_ADMIN_USER` / `NAVIDROME_ADMIN_PASSWORD`);
+  without it the badges are simply absent and search is untouched. Matching is deliberately
+  conservative, since a false "you already have this" is worse than a missed one.
+- Profile avatars for everyone: an explicit `avatar_url` still wins, and any account without one
+  now gets a deterministic doodle generated server-side as an inline SVG. No new dependency and
+  no external avatar service, so it works on an install with no internet access.
 
 No tagged release yet; `v0.1.0` will be cut once the pipeline is proven end to end.

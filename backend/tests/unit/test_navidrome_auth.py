@@ -118,3 +118,76 @@ class TestFetchProfile:
         profile = await _auth().fetch_profile("jay", "pw")
         assert profile.is_admin is False
         assert profile.email is None
+
+
+class TestFetchProfileDetail:
+    """The full getUser.view record, captured for the planned move off email-as-identity.
+
+    The payload below is the shape a live Navidrome 0.63.2 actually returns, including the
+    detail that matters most for that work: no `email` key at all. Nothing here is persisted
+    yet -- this pins that the data is available to the caller.
+    """
+
+    LIVE_PAYLOAD = {
+        "subsonic-response": {
+            "status": "ok",
+            "user": {
+                "username": "jay739",
+                "scrobblingEnabled": True,
+                "adminRole": True,
+                "settingsRole": False,
+                "downloadRole": True,
+                "uploadRole": False,
+                "playlistRole": False,
+                "coverArtRole": True,
+                "commentRole": False,
+                "podcastRole": False,
+                "streamRole": True,
+                "jukeboxRole": False,
+                "shareRole": True,
+                "videoConversionRole": False,
+                "folder": [1],
+            },
+        }
+    }
+
+    async def test_captures_navidromes_own_spelling_of_the_username(self, httpx_mock):
+        # The canonical identity the follow-up PR should key on, which can differ in case from
+        # whatever the user typed into the login form.
+        httpx_mock.add_response(url=GETUSER, json=self.LIVE_PAYLOAD)
+        profile = await _auth().fetch_profile("JAY739", "pw")
+        assert profile.username == "jay739"
+
+    async def test_captures_every_role_flag(self, httpx_mock):
+        httpx_mock.add_response(url=GETUSER, json=self.LIVE_PAYLOAD)
+        profile = await _auth().fetch_profile("jay739", "pw")
+        assert profile.roles["downloadRole"] is True
+        assert profile.roles["uploadRole"] is False
+        assert profile.roles["shareRole"] is True
+        assert len(profile.roles) == 13
+
+    async def test_captures_music_folder_ids(self, httpx_mock):
+        httpx_mock.add_response(url=GETUSER, json=self.LIVE_PAYLOAD)
+        assert (await _auth().fetch_profile("jay739", "pw")).folder_ids == (1,)
+
+    async def test_reports_that_navidrome_supplied_no_email(self, httpx_mock):
+        # The normal case on a real deployment, and the whole reason a synthetic
+        # <username>@navidrome.local address has to be invented today.
+        httpx_mock.add_response(url=GETUSER, json=self.LIVE_PAYLOAD)
+        profile = await _auth().fetch_profile("jay739", "pw")
+        assert profile.email is None
+        assert profile.has_email is False
+
+    async def test_reports_an_email_when_one_is_actually_set(self, httpx_mock):
+        httpx_mock.add_response(
+            url=GETUSER,
+            json={"subsonic-response": {"user": {"email": "jay@example.com"}}},
+        )
+        assert (await _auth().fetch_profile("jay", "pw")).has_email is True
+
+    async def test_detail_fields_default_empty_on_failure(self, httpx_mock):
+        httpx_mock.add_response(url=GETUSER, status_code=500)
+        profile = await _auth().fetch_profile("jay", "pw")
+        assert profile.username is None
+        assert profile.roles == {}
+        assert profile.folder_ids == ()

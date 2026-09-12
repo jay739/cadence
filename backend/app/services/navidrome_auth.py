@@ -5,36 +5,95 @@ through it. A library user types the username and password they already use for 
 and Cadence asks Navidrome whether that pair is valid, then provisions or links a local user
 row so the rest of the app (requests, roles, permissions) keeps working unchanged.
 
-Subsonic's auth scheme is salted-token: the client generates a random salt, sends
-`t = md5(password + salt)` alongside `s = salt`, and the server recomputes it. MD5 is fixed by
-the protocol, not a choice made here, and it is never used to store anything: the digest is a
-per-request proof against a per-request salt and Cadence keeps no hash of a Navidrome password
-at all. Marked usedforsecurity=False so the intent is explicit and it keeps working on
-FIPS-restricted builds.
+The wire protocol itself (salted-token credential, envelope unwrapping, the constants) lives
+in app.services.navidrome_subsonic and is shared with the library client, so Cadence has
+exactly one Subsonic implementation. See that module for why MD5 appears here at all.
+
+WHY PER-USER NAVIDROME CALLS ONLY HAPPEN AT LOGIN
+-------------------------------------------------
+Cadence deliberately never stores a Navidrome password (see AuthProvider.NAVIDROME in
+app.models.user: password_hash stays null and the credential is replayed only at login). So
+the user's own credential exists in this process for exactly the duration of a login request,
+and any Subsonic call that must be made *as that user* has to happen inside `authenticate()`
+or not at all.
+
+An operator credential does not buy a way around that, which was verified against a live
+Navidrome 0.63.2: `getUser.view?username=<someone else>` answers error 50 "User is not
+authorized for the given operation" even when the caller holds adminRole, and `getUsers.view`
+returns only the calling user. Navidrome's Subsonic surface is self-scoped. There is therefore
+no way to backfill or refresh another user's Navidrome details out of band, and nothing here
+pretends otherwise.
 """
 
 from __future__ import annotations
 
-import hashlib
-import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import structlog
 
 from app.core.safe_http import POLICY_ALLOW_PRIVATE, SafeHttpClient
+from app.services.navidrome_subsonic import (
+    ERROR_WRONG_CREDENTIALS,
+    SubsonicProtocolError,
+    auth_params,
+    coerce_bool,
+    error_code,
+    is_ok,
+    subsonic_body,
+)
 
 logger = structlog.get_logger(__name__)
 
-# The Subsonic API version Navidrome has supported since well before its 0.50 releases.
-# Sent verbatim; bumping it gains nothing for a ping/getUser-only client.
-_API_VERSION = "1.16.1"
-_CLIENT_NAME = "cadence"
+# Every boolean role flag getUser.view is specified to return. Captured wholesale rather than
+# cherry-picked so the planned "stop using email as identity" work has the full picture of what
+# Navidrome actually says about an account without needing another round of protocol probing.
+_ROLE_FIELDS = (
+    "scrobblingEnabled",
+    "adminRole",
+    "settingsRole",
+    "downloadRole",
+    "uploadRole",
+    "playlistRole",
+    "coverArtRole",
+    "commentRole",
+    "podcastRole",
+    "streamRole",
+    "jukeboxRole",
+    "shareRole",
+    "videoConversionRole",
+)
 
 
 @dataclass(frozen=True)
 class NavidromeProfile:
+    """Everything Navidrome will tell us about the user who just authenticated.
+
+    `is_admin` and `email` are the two fields the login path acts on today and keep their
+    original position so existing callers and tests construct this unchanged. The rest is
+    carried for the benefit of the follow-up work that drops email-as-identity: it is populated
+    and logged, but nothing in this PR persists or branches on it.
+
+    A note that matters for that follow-up: on the reference deployment neither Navidrome
+    account has an email set at all, and Navidrome does not require one. `email` being None is
+    the normal case, not an edge case, which is exactly why
+    `app.services.users._provider_namespaced_email` has to invent a synthetic
+    `<username>@navidrome.local` address today.
+    """
+
     is_admin: bool
     email: str | None
+    # Navidrome's own spelling of the username, which is the canonical identity the follow-up
+    # PR should key on. May differ in case from what the user typed at the login form.
+    username: str | None = None
+    # Raw role flags from getUser.view, e.g. {"downloadRole": True, "shareRole": False, ...}.
+    roles: dict[str, bool] = field(default_factory=dict)
+    # Music folder ids this user may see. Navidrome returns these as `folder: [1]`.
+    folder_ids: tuple[int, ...] = ()
+
+    @property
+    def has_email(self) -> bool:
+        """Whether Navidrome supplied a real address, as opposed to Cadence inventing one."""
+        return bool(self.email)
 
 
 class NavidromeAuthError(Exception):
@@ -58,27 +117,16 @@ class NavidromeAuthenticator:
         return bool(self._base_url)
 
     def _auth_params(self, username: str, password: str) -> dict:
-        salt = secrets.token_hex(8)
-        token = hashlib.md5(
-            (password + salt).encode("utf-8"), usedforsecurity=False
-        ).hexdigest()
-        return {
-            "u": username,
-            "t": token,
-            "s": salt,
-            "v": _API_VERSION,
-            "c": _CLIENT_NAME,
-            "f": "json",
-        }
+        return auth_params(username, password)
 
     @staticmethod
     def _subsonic_body(payload: object) -> dict:
-        if not isinstance(payload, dict):
-            raise NavidromeAuthError("Navidrome returned a non-object response")
-        body = payload.get("subsonic-response")
-        if not isinstance(body, dict):
-            raise NavidromeAuthError("Navidrome response missing subsonic-response")
-        return body
+        # Translated to this module's own exception type so the error handling below (and every
+        # existing caller and test) keeps catching exactly what it always caught.
+        try:
+            return subsonic_body(payload)
+        except SubsonicProtocolError as exc:
+            raise NavidromeAuthError(str(exc)) from exc
 
     async def verify_credentials(self, username: str, password: str) -> bool | None:
         """True if Navidrome accepts the pair, False if it rejects it, None if unreachable.
@@ -111,24 +159,28 @@ class NavidromeAuthenticator:
             logger.warning("navidrome_bad_response", error=str(exc))
             return None
 
-        if body.get("status") == "ok":
+        if is_ok(body):
             return True
 
         # Subsonic error 40 is specifically "wrong username or password". Anything else (server
         # misconfiguration, unsupported version, trial expired) is not the user's fault and
         # must not be reported to them as a bad password.
-        error_code = (body.get("error") or {}).get("code")
-        if error_code == 40:
+        code = error_code(body)
+        if code == ERROR_WRONG_CREDENTIALS:
             return False
-        logger.warning("navidrome_auth_error", code=error_code)
+        logger.warning("navidrome_auth_error", code=code)
         return None
 
     async def fetch_profile(self, username: str, password: str) -> NavidromeProfile:
-        """Read the admin flag and email Navidrome holds for this user.
+        """Read everything Navidrome holds for this user, as this user.
 
         Best-effort by design: a failure here yields an empty profile, never an auth failure.
         A Navidrome deployment that does not answer getUser should still let its users log in
         as ordinary requesters rather than locking them out.
+
+        This is the only moment Cadence can make this call for this user -- see the module
+        docstring -- so it captures the whole record rather than just the two fields the login
+        path currently consumes.
         """
         empty = NavidromeProfile(is_admin=False, email=None)
         if not self.configured:
@@ -149,11 +201,42 @@ class NavidromeAuthenticator:
         user_obj = body.get("user")
         if not isinstance(user_obj, dict):
             return empty
-        # Navidrome serialises the role flags as real JSON booleans, but other Subsonic
-        # servers emit the string "true", so accept both rather than trusting one shape.
-        admin_role = user_obj.get("adminRole")
+
         email = user_obj.get("email")
-        return NavidromeProfile(
-            is_admin=admin_role is True or str(admin_role).lower() == "true",
+        reported_username = user_obj.get("username")
+        profile = NavidromeProfile(
+            is_admin=coerce_bool(user_obj.get("adminRole")),
             email=email if isinstance(email, str) and "@" in email else None,
+            username=(
+                reported_username
+                if isinstance(reported_username, str) and reported_username
+                else None
+            ),
+            roles={
+                key: coerce_bool(user_obj[key])
+                for key in _ROLE_FIELDS
+                if key in user_obj
+            },
+            folder_ids=_folder_ids(user_obj.get("folder")),
         )
+        # Logged rather than persisted: this PR deliberately does not touch the User model or
+        # the auth flow, so the structured log is where an operator (and the follow-up PR's
+        # author) can see what Navidrome actually reports for a real account.
+        logger.info(
+            "navidrome_profile_fetched",
+            username=profile.username or username,
+            is_admin=profile.is_admin,
+            has_email=profile.has_email,
+            roles=profile.roles,
+            folder_ids=list(profile.folder_ids),
+        )
+        return profile
+
+
+def _folder_ids(value: object) -> tuple[int, ...]:
+    """Navidrome returns `folder` as a list of ints; tolerate a bare int or a missing key."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return (value,)
+    if not isinstance(value, list):
+        return ()
+    return tuple(v for v in value if isinstance(v, int) and not isinstance(v, bool))

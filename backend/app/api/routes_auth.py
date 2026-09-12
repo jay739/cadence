@@ -10,6 +10,7 @@ from app.core.limiter import auth_rate_limit, limiter
 from app.core.security import create_session_token
 from app.models.user import AuthProvider, User, UserRole
 from app.schemas.user import LoginIn, RegisterIn, TokenOut, UserOut, WebhookUrlIn
+from app.services.avatars import resolve_avatar
 from app.services.users import (
     EmailAlreadyRegisteredError,
     authenticate,
@@ -32,10 +33,19 @@ def build_user_out(user: User, settings: Settings) -> UserOut:
     column on User), so it is filled in explicitly here, and only for a Navidrome-backed
     account -- this is what the frontend's profile page links to for password changes, since
     Cadence never stores a password for these accounts to change itself.
+
+    `avatar`/`avatar_source` are resolved the same way and for the same reason. The seed is the
+    user's id rather than their email precisely because the email is the thing a later change is
+    expected to replace: seeding on it would silently regenerate every doodle the day that
+    lands. `navidrome_picture_url` is left unset because Navidrome has no per-user avatar to
+    fetch -- app.services.avatars records the probe that established that.
     """
     out = UserOut.model_validate(user)
     if user.auth_provider is AuthProvider.NAVIDROME:
         out.navidrome_url = settings.navidrome_url
+    avatar = resolve_avatar(seed=user.id, avatar_url=user.avatar_url)
+    out.avatar = avatar.url
+    out.avatar_source = avatar.source
     return out
 
 
