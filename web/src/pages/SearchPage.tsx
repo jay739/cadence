@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import type { PreferredFormat, SearchSourceName, TrackResult } from "../types/api";
 import { TrackCard } from "../components/TrackCard";
 import { SpotifyPersonalizationPanel } from "../components/SpotifyPersonalizationPanel";
 import { useSearchStream } from "../hooks/useSearchStream";
+import { useLibraryStatus } from "../hooks/useLibraryStatus";
 import "./SearchPage.css";
+
+// Stable identity for "no tracks to look up", so the library query key does not churn while a
+// source is still streaming in.
+const EMPTY_RESULTS: TrackResult[] = [];
 
 const SOURCE_TABS: { key: SearchSourceName; label: string }[] = [
   { key: "apple", label: "Apple" },
@@ -44,6 +49,9 @@ function SearchResultsPanel({
 }: SearchResultsPanelProps) {
   const searchStream = useSearchStream(query);
   const activeSource = searchStream.sources[activeTab];
+  // Which of these results the user already owns. Empty until (and unless) Navidrome answers,
+  // so nothing here needs a loading or error branch — see the hook's docstring.
+  const libraryStatus = useLibraryStatus(activeSource?.results ?? EMPTY_RESULTS);
   const activeSourcePending = !activeSource && query.length > 0;
   const activeLabel = SOURCE_TABS.find((t) => t.key === activeTab)?.label;
   // One Spotify tab: with a query it behaves like any other search tab; with no query (or when
@@ -117,6 +125,7 @@ function SearchResultsPanel({
                     track={track}
                     onRequest={onRequest}
                     requestState={requestStates[trackKey(track)] ?? "idle"}
+                    libraryMatch={libraryStatus[trackKey(track)]}
                   />
                 ))}
               </ul>
@@ -147,6 +156,13 @@ function ResolveLinkPanel({ onRequest, requestStates }: ResolveLinkPanelProps) {
   const [linkUrl, setLinkUrl] = useState("");
   const [linkError, setLinkError] = useState<string | null>(null);
   const [resolvedTrack, setResolvedTrack] = useState<TrackResult | null>(null);
+  // Someone who pasted an exact link is the likeliest person to already own the track, so this
+  // panel gets the same library badge the search results do.
+  const resolvedTracks = useMemo(
+    () => (resolvedTrack ? [resolvedTrack] : EMPTY_RESULTS),
+    [resolvedTrack],
+  );
+  const libraryStatus = useLibraryStatus(resolvedTracks);
 
   const resolveLinkMutation = useMutation({
     mutationFn: (url: string) => api.search.resolveLink(url),
@@ -197,6 +213,7 @@ function ResolveLinkPanel({ onRequest, requestStates }: ResolveLinkPanelProps) {
             track={resolvedTrack}
             onRequest={onRequest}
             requestState={requestStates[trackKey(resolvedTrack)] ?? "idle"}
+            libraryMatch={libraryStatus[trackKey(resolvedTrack)]}
           />
         </ul>
       )}

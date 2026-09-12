@@ -35,6 +35,7 @@ class TestHealth:
             "slskd",
             "spotify",
             "navidrome",
+            "navidrome_library",
             "ytdlp",
         }
         for status in integrations.values():
@@ -160,5 +161,6 @@ class TestIntegrationDetailIsAdminOnly:
             "slskd",
             "spotify",
             "navidrome",
+            "navidrome_library",
             "ytdlp",
         }

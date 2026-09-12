@@ -42,6 +42,10 @@ export function AppShell() {
         <div className="shell__account">
           {user ? (
             <>
+              {/* Decorative: the email beside it already identifies the account, so the image
+                  carries no information a screen reader needs. `avatar` is always populated,
+                  falling back to a generated doodle, so there is no empty state to handle. */}
+              <img className="shell__avatar" src={user.avatar} alt="" />
               <span className="shell__email">{user.email}</span>
               <button type="button" className="button button--ghost" onClick={() => logout()}>
                 Sign out

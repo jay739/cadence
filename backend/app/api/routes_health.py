@@ -10,6 +10,7 @@ from app.core.config import Settings
 from app.core.safe_http import POLICY_ALLOW_PRIVATE, SafeHttpClient, SafeHttpError
 from app.models.user import User
 from app.schemas.health import HealthOut, IntegrationsHealthOut, IntegrationStatus
+from app.services.navidrome_library import NavidromeLibraryClient
 from app.services.settings_store import apply_effective_settings
 
 logger = structlog.get_logger(__name__)
@@ -84,6 +85,12 @@ async def integrations_health(
         "slskd": IntegrationStatus(configured=settings.slskd_configured),
         "spotify": IntegrationStatus(configured=settings.spotify_configured),
         "navidrome": IntegrationStatus(configured=bool(settings.navidrome_url)),
+        # The optional Navidrome service account behind the already-in-library check. Separate
+        # from "navidrome" above because the two are independently useful: sign-in works with no
+        # service account, and the check is simply absent until one is supplied.
+        "navidrome_library": IntegrationStatus(
+            configured=settings.navidrome_library_configured
+        ),
         "ytdlp": IntegrationStatus(configured=settings.ytdlp_shim_configured),
     }
 
@@ -92,6 +99,14 @@ async def integrations_health(
             integrations["navidrome"].reachable = await _reachable(
                 f"{settings.navidrome_url.rstrip('/')}/rest/ping.view"
             )
+        if settings.navidrome_library_configured:
+            # An authenticated ping rather than the plain one above: the useful question here is
+            # whether the *service account* works, which an anonymous ping cannot answer.
+            integrations["navidrome_library"].reachable = await NavidromeLibraryClient(
+                settings.navidrome_url,
+                settings.navidrome_admin_user,
+                settings.navidrome_admin_password,
+            ).ping()
         if settings.prowlarr_configured and settings.prowlarr_url:
             integrations["prowlarr"].reachable = await _reachable(
                 f"{settings.prowlarr_url.rstrip('/')}/api/v1/system/status",
