@@ -190,6 +190,12 @@ class _RequestSeed(TypedDict, total=False):
     admin_note: str
     failure_reason: str
     desired_quality: str
+    # How far back to date this request, instead of stamping the whole seeded queue with the
+    # moment the demo container happened to boot. Without it every demo request shares one
+    # timestamp, which makes the admin insight page's request-volume series a single spike
+    # against 29 empty days -- technically accurate about the seed data, and useless as a
+    # demonstration of what the page shows on a real install.
+    created_days_ago: int
 
 
 DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
@@ -200,6 +206,7 @@ DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
         "source": "apple",
         "source_id": "demo-apple-0",
         "status": RequestStatus.PENDING,
+        "created_days_ago": 0,
     },
     {
         "title": "Tum Hi Ho",
@@ -208,6 +215,7 @@ DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
         "source": "apple",
         "source_id": "demo-apple-1",
         "status": RequestStatus.APPROVED,
+        "created_days_ago": 2,
     },
     {
         "title": "Kesariya",
@@ -216,6 +224,7 @@ DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
         "source": "spotify",
         "source_id": "demo-spotify-0",
         "status": RequestStatus.DOWNLOADING,
+        "created_days_ago": 1,
     },
     {
         "title": "Butta Bomma",
@@ -225,6 +234,7 @@ DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
         "source_id": "demo-mbid-00000002-0000-0000-0000-000000000000",
         "status": RequestStatus.FULFILLED,
         "final_file_path": "Armaan Malik/Butta Bomma.flac",
+        "created_days_ago": 4,
     },
     {
         "title": "Blinding Lights",
@@ -234,6 +244,7 @@ DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
         "source_id": "demo-apple-4",
         "status": RequestStatus.REJECTED,
         "admin_note": "Duplicate of an existing library file.",
+        "created_days_ago": 9,
     },
     {
         "title": "As It Was",
@@ -244,6 +255,7 @@ DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
         "status": RequestStatus.FAILED,
         "failure_reason": "No qualifying release found on configured indexers, "
         "and Soulseek fallback found no exact-title match within the attempt budget.",
+        "created_days_ago": 6,
     },
     {
         "title": "Naatu Naatu",
@@ -255,5 +267,6 @@ DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
         # The whole point of this seed: a lossless ask that every tier could only answer with
         # lossy audio, parked on the requester's decision rather than quietly downgraded.
         "desired_quality": "lossless",
+        "created_days_ago": 3,
     },
 ]

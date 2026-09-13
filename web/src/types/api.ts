@@ -218,6 +218,53 @@ export interface TestConnectionResult {
   detail: string;
 }
 
+// --- Admin-only fulfillment insights (mirrors backend/app/schemas/insights.py) ---
+
+export interface TierInsight {
+  // "prowlarr" | "slskd" | "ytdlp" today, but deliberately a plain string: the backend reports
+  // any tier it finds rows for, so a tier added server-side shows up without a client release.
+  backend: string;
+  // Audit rows this tier wrote. Always >= requests_tried, since one successful pass writes
+  // several (e.g. "grabbed" and then "download_completed").
+  attempts: number;
+  requests_tried: number;
+  requests_delivered: number;
+  // null when the tier never ran in the window. That is not the same as failing everything, so
+  // it must never render as 0%: an unconfigured indexer did not lose, it was never asked.
+  success_rate: number | null;
+  outcomes: Record<string, number>;
+}
+
+export interface FailureInsight {
+  outcome: string;
+  count: number;
+  backends: Record<string, number>;
+}
+
+export interface DailyVolumeInsight {
+  // YYYY-MM-DD. Quiet days are present with requests: 0, never omitted, so the series is always
+  // exactly window_days long and a gap reads as a gap.
+  date: string;
+  requests: number;
+}
+
+export interface TopArtistInsight {
+  artist: string;
+  requests: number;
+}
+
+export interface AdminInsights {
+  window_days: number;
+  // First day included in the window (YYYY-MM-DD, UTC).
+  since: string;
+  total_requests: number;
+  status_counts: Record<RequestStatus, number>;
+  tiers: TierInsight[];
+  failures: FailureInsight[];
+  daily_volume: DailyVolumeInsight[];
+  top_artists: TopArtistInsight[];
+}
+
 // --- Opt-in per-user Spotify personalization (mirrors
 // backend/app/schemas/spotify_personalization.py) ---
 

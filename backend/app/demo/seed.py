@@ -6,6 +6,8 @@ already-seeded demo instance is a no-op rather than creating duplicates.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,9 +58,15 @@ async def seed_demo_data(session: AsyncSession) -> None:
             role=UserRole.USER,
         )
 
+    now = datetime.now(UTC)
+
     for seed in DEMO_REQUEST_SEEDS:
         status: RequestStatus = seed["status"]
         dedupe_key = compute_dedupe_key(seed["source"], seed["source_id"])
+        # Spread across the last week and a half rather than all landing on boot time, so the
+        # request-volume series on the admin insight page shows a history instead of one spike.
+        # Explicit rather than left to the column default, which would stamp "now" on all of them.
+        created_at = now - timedelta(days=seed.get("created_days_ago", 0))
         row = Request(
             user_id=demo_user.id,
             title=seed["title"],
@@ -72,6 +80,8 @@ async def seed_demo_data(session: AsyncSession) -> None:
             failure_reason=seed.get("failure_reason"),
             final_file_path=seed.get("final_file_path"),
             desired_quality=seed.get("desired_quality", "any"),
+            created_at=created_at,
+            updated_at=created_at,
         )
         session.add(row)
         await session.flush()
@@ -99,6 +109,7 @@ async def seed_demo_data(session: AsyncSession) -> None:
                         "lossless request, so it declined rather than handing over a lossy "
                         "file."
                     ),
+                    created_at=created_at,
                 )
             )
             row.fulfillment_attempts_count = 1
@@ -129,9 +140,30 @@ async def seed_demo_data(session: AsyncSession) -> None:
                         else FulfillmentOutcome.SEARCHED_NO_QUALIFYING_CANDIDATE.value
                     ),
                     detail=seed.get("failure_reason"),
+                    created_at=created_at,
                 )
             )
             row.fulfillment_attempts_count = 1
+
+        if status is RequestStatus.FULFILLED:
+            # The completion row the real worker writes once the grab above finishes (see the
+            # DOWNLOAD_COMPLETED write at the end of _try_prowlarr). Without it the demo's
+            # audit trail stops at "handed to the download client" for a request whose whole
+            # point is that it landed, and every tier's delivery rate on the admin insight
+            # page reads as 0% because nothing in the seed data ever completes.
+            session.add(
+                FulfillmentAttempt(
+                    request_id=row.id,
+                    backend="prowlarr",
+                    query_used=f"{seed['artist']} {seed['title']}",
+                    candidates_considered=None,
+                    chosen_candidate=None,
+                    outcome=FulfillmentOutcome.DOWNLOAD_COMPLETED.value,
+                    detail=f"Filed at {seed.get('final_file_path')}",
+                    created_at=created_at,
+                )
+            )
+            row.fulfillment_attempts_count = 2
 
     await session.commit()
     logger.info("demo_data_seeded", requests=len(DEMO_REQUEST_SEEDS))
