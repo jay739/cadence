@@ -25,6 +25,7 @@ from app.services.requests import (
     accept_lossy_copy,
     approve_request,
     create_or_get_existing_request,
+    delivered_by_backend,
     get_request_by_id,
     get_request_by_id_with_attempts,
     list_all_requests,
@@ -65,12 +66,26 @@ async def create_request(
     return RequestOut.model_validate(request_row)
 
 
+def _with_delivered_by(request_row) -> RequestOut:
+    """Serialize a request, filling in the tier that actually delivered it.
+
+    Set explicitly here rather than as a Pydantic computed field on the model: `delivered_by`
+    is derived from the attempts relationship, and only the routes that eager-load it can
+    answer the question at all. A computed field would serialize correctly on the detail route
+    and raise MissingGreenlet on any route that did not think to eager-load, which is exactly
+    the failure mode `get_request_by_id_with_attempts` documents.
+    """
+    out = RequestOut.model_validate(request_row)
+    out.delivered_by = delivered_by_backend(request_row)
+    return out
+
+
 @router.get("/mine", response_model=list[RequestOut])
 async def my_requests(
     user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)
 ) -> list[RequestOut]:
     rows = await list_requests_for_user(session, user.id)
-    return [RequestOut.model_validate(r) for r in rows]
+    return [_with_delivered_by(r) for r in rows]
 
 
 @router.get("/{request_id}", response_model=RequestDetailOut)
@@ -85,7 +100,9 @@ async def get_request_detail(
             status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
         )
     _ensure_owner_or_admin(request_row, user)
-    return RequestDetailOut.model_validate(request_row)
+    detail = RequestDetailOut.model_validate(request_row)
+    detail.delivered_by = delivered_by_backend(request_row)
+    return detail
 
 
 @router.get("/admin/pending", response_model=list[RequestOut])

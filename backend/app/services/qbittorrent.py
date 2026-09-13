@@ -67,9 +67,14 @@ class QBittorrentClient:
                 return t
         return None
 
-    async def is_complete(self, torrent_hash: str) -> bool:
+    async def _torrent_info(self, torrent_hash: str) -> dict | None:
+        """The single torrent matching `torrent_hash`, or None if it cannot be read.
+
+        Shared by `is_complete` and `progress_percent` so that one poll tick asking both
+        questions is still one HTTP call's worth of logic rather than two divergent copies.
+        """
         if not self.configured or self._sid_cookie is None:
-            return False
+            return None
         resp = await self._http.get(
             f"{self._base_url}/api/v2/torrents/info",
             policy=POLICY_ALLOW_PRIVATE,
@@ -77,11 +82,35 @@ class QBittorrentClient:
             headers={"Cookie": f"SID={self._sid_cookie}"},
         )
         if resp.status_code != 200:
-            return False
+            return None
         torrents = resp.json()
         if not torrents:
+            return None
+        first = torrents[0]
+        return first if isinstance(first, dict) else None
+
+    async def is_complete(self, torrent_hash: str) -> bool:
+        torrent = await self._torrent_info(torrent_hash)
+        if torrent is None:
             return False
-        return torrents[0].get("progress", 0) >= 1.0
+        return torrent.get("progress", 0) >= 1.0
+
+    async def progress_percent(self, torrent_hash: str) -> float | None:
+        """How far along this torrent is, 0..100, or None if qBittorrent did not say.
+
+        qBittorrent is the one fulfillment tier that reports a genuine fraction: `progress` is
+        a 0..1 float on the same torrents/info payload `is_complete` already reads, so showing
+        a percentage here costs no extra call and invents nothing. None (rather than 0) when
+        the torrent cannot be read or the field is missing/unusable, because "we don't know
+        yet" and "no bytes have arrived" are different things to show a requester.
+        """
+        torrent = await self._torrent_info(torrent_hash)
+        if torrent is None:
+            return None
+        raw = torrent.get("progress")
+        if not isinstance(raw, int | float) or isinstance(raw, bool):
+            return None
+        return max(0.0, min(100.0, float(raw) * 100.0))
 
     async def get_content_path(self, torrent_hash: str) -> str | None:
         if not self.configured or self._sid_cookie is None:

@@ -1,0 +1,45 @@
+.download-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.download-progress__track {
+  position: relative;
+  width: 100%;
+  min-width: 120px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-status-downloading) 16%, transparent);
+  overflow: hidden;
+}
+
+/* Transitions the width so a poll tick reads as movement rather than a jump. This animates
+   only BETWEEN real reported values -- it never advances on its own, so a stalled transfer
+   shows a stationary bar, which is the honest picture. */
+.download-progress__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-status-downloading);
+  transition: width var(--motion-hover) var(--ease-out-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download-progress__fill {
+    transition: none;
+  }
+}
+
+.download-progress__caption {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--color-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.download-progress__percent {
+  color: var(--color-status-downloading);
+}
