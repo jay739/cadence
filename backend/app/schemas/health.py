@@ -33,6 +33,21 @@ class HealthOut(BaseModel):
     spotify_search_available: bool
 
 
+class DiskSpaceOut(BaseModel):
+    """Free space where fulfilled tracks are filed, and whether it clears the configured floor.
+
+    Admin-only for the same reason the integration detail is: it describes the operator's
+    storage, not anything a requester needs.
+    """
+
+    path: str
+    free_gb: float
+    total_gb: float
+    percent_used: float
+    min_free_gb: float
+    sufficient: bool
+
+
 class IntegrationsHealthOut(BaseModel):
     """Per-integration configured/reachable detail. Admin only.
 
@@ -43,3 +58,5 @@ class IntegrationsHealthOut(BaseModel):
 
     mode: str
     integrations: dict[str, IntegrationStatus]
+    # None when the library filesystem cannot be read, which is not treated as a failure.
+    disk: DiskSpaceOut | None = None
