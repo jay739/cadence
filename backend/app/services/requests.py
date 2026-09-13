@@ -241,6 +241,31 @@ async def accept_lossy_copy(session: AsyncSession, request_row: Request) -> Requ
     return request_row
 
 
+async def pick_candidate(
+    session: AsyncSession, request_row: Request, candidate: dict
+) -> Request:
+    """Pin a hand-picked candidate to a request and put it back in the fulfillment queue.
+
+    `candidate` is already validated and already sourced from this request's own audit trail
+    (app.services.manual_candidate.resolve_manual_candidate does both); this function only
+    persists the decision and re-queues, the same way accept_lossy_copy persists an answer and
+    re-queues rather than driving fulfillment itself.
+
+    Back to APPROVED for the reason accept_lossy_copy gives: the worker owns claiming and
+    running jobs, so a pinned request goes through the same queue state, the same lock, and
+    the same crash recovery as any other approved one.
+    """
+    request_row.manual_candidate = candidate
+    request_row.status = RequestStatus.APPROVED
+    # Cleared like retry and accept-lossy clear it: a reason from the pass that picked wrong
+    # is stale the moment a fresh, differently-targeted attempt is in flight, and the full
+    # history survives in the FulfillmentAttempt audit trail regardless.
+    request_row.failure_reason = None
+    await session.commit()
+    await session.refresh(request_row)
+    return request_row
+
+
 async def retry_request(session: AsyncSession, request_row: Request) -> Request:
     if request_row.status != RequestStatus.FAILED:
         raise RequestNotFailedError(request_row.status.value)

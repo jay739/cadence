@@ -127,6 +127,20 @@ class RequestDetailOut(RequestOut):
     attempts: list[FulfillmentAttemptOut] = Field(default_factory=list)
 
 
+class PickCandidateIn(BaseModel):
+    """A pointer at one candidate in this request's own audit trail, never a candidate itself.
+
+    The client says "the candidate at index N of attempt X" and the server reads the actual
+    candidate out of the FulfillmentAttempt row it already wrote. That is the whole reason
+    this schema carries no name, identifier, or URL: a request body that cannot express a
+    download target cannot smuggle one into an outbound call (see
+    app.services.manual_candidate).
+    """
+
+    attempt_id: str = Field(min_length=1, max_length=36)
+    candidate_index: int = Field(ge=0)
+
+
 class ApproveRequestIn(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
 

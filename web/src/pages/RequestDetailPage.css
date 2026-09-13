@@ -114,10 +114,55 @@
 
 .attempt-card__candidates ul {
   margin: var(--space-2) 0 0;
-  padding-left: var(--space-4);
+  padding: 0;
+  list-style: none;
 }
 
 .attempt-card__candidates li {
   word-break: break-all;
   margin-bottom: var(--space-1);
+}
+
+/* Each candidate row pairs its text with the override action. The text is allowed to wrap
+   and the button is not, so a long release name never squeezes the action to nothing. */
+.candidate-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border-subtle, rgb(255 255 255 / 8%));
+}
+
+.candidate-row:last-child {
+  border-bottom: none;
+}
+
+.candidate-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.candidate-row__name {
+  display: block;
+  color: var(--color-text);
+}
+
+.candidate-row__meta {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: 0.72rem;
+  color: var(--color-text-faint);
+}
+
+.candidate-row__pick {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The explanation of what picking does, shown once above the list rather than repeated on
+   every row. */
+.attempt-card__pick-hint {
+  margin: var(--space-2) 0 0;
+  max-width: 62ch;
+  color: var(--color-text-muted);
 }

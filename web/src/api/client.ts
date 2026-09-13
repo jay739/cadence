@@ -174,6 +174,20 @@ export const api = {
       request<RequestRecord>(`/api/requests/${id}/accept-lossy`, {
         method: "POST",
       }),
+    // Overrides a wrong automatic pick: re-runs fulfillment against one specific candidate
+    // from this request's own audit trail, instead of scoring the search results again.
+    //
+    // Deliberately a pointer (which attempt, which index) rather than the candidate object.
+    // The backend reads the real candidate out of the attempt row it wrote itself, so a
+    // download target can never be introduced from here. A 409 means the request is in a
+    // status that cannot be re-picked (fulfilled, downloading, rejected) or that the pick
+    // would downgrade a lossless request; a 422 means the pointer does not resolve to
+    // something actionable. Both arrive with the backend's own wording in `.message`.
+    pickCandidate: (id: string, attemptId: string, candidateIndex: number) =>
+      request<RequestRecord>(`/api/requests/${id}/pick-candidate`, {
+        method: "POST",
+        body: JSON.stringify({ attempt_id: attemptId, candidate_index: candidateIndex }),
+      }),
   },
   health: {
     get: () => request<HealthResponse>("/api/health"),

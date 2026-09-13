@@ -15,9 +15,17 @@ from app.models.user import User, UserRole
 from app.schemas.request import (
     ApproveRequestIn,
     CreateRequestIn,
+    PickCandidateIn,
     RejectRequestIn,
     RequestDetailOut,
     RequestOut,
+)
+from app.services.manual_candidate import (
+    CandidateNotActionableError,
+    CandidateNotFoundError,
+    CandidateQualityRefusedError,
+    RequestNotPickableError,
+    resolve_manual_candidate,
 )
 from app.services.requests import (
     RequestNotAwaitingQualityError,
@@ -31,6 +39,7 @@ from app.services.requests import (
     list_all_requests,
     list_pending_requests,
     list_requests_for_user,
+    pick_candidate,
     reject_request,
     retry_request,
 )
@@ -187,6 +196,74 @@ async def retry_failed_request(
             detail=f"Only a failed request can be retried (this one is {exc.args[0]!r})",
         ) from exc
     logger.info("request_retried", request_id=request_row.id, user_id=user.id)
+    worker = get_worker()
+    if worker is not None:
+        worker.notify()
+    return RequestOut.model_validate(request_row)
+
+
+@router.post("/{request_id}/pick-candidate", response_model=RequestOut)
+@limiter.limit(REQUEST_RETRY_RATE_LIMIT)
+async def pick_candidate_for_request(
+    request: FastAPIRequest,
+    request_id: str,
+    body: PickCandidateIn,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> RequestOut:
+    """Override a wrong automatic pick by naming a candidate from this request's audit trail.
+
+    Owner-or-admin, like retry and accept-lossy: this is the requester correcting their own
+    request, not an admin decision. It shares retry's rate limit for the same reason
+    accept-lossy does, since it is the same shape of action, a user-initiated re-run of
+    fulfillment for one request.
+
+    The request body is a pointer (attempt id + index), never a candidate. The candidate
+    itself is read back out of the FulfillmentAttempt rows Cadence wrote during a real
+    fulfillment pass, so nothing a client sends can become a download target. Every refusal
+    below names what was wrong and what to do instead, rather than a generic failure.
+    """
+    request_row = await get_request_by_id_with_attempts(session, request_id)
+    if request_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
+        )
+    _ensure_owner_or_admin(request_row, user)
+
+    try:
+        candidate = resolve_manual_candidate(
+            request_row,
+            list(request_row.attempts),
+            attempt_id=body.attempt_id,
+            candidate_index=body.candidate_index,
+        )
+    except RequestNotPickableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Only a request that is not already downloading or delivered can have its "
+                f"download choice overridden (this one is {exc.args[0]!r})"
+            ),
+        ) from exc
+    except CandidateQualityRefusedError as exc:
+        # 409, not 422: the pointer resolved perfectly well, and the conflict is with the
+        # request's own still-standing lossless ask.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except (CandidateNotFoundError, CandidateNotActionableError) as exc:
+        # 422: the body was well-formed but does not point at something downloadable.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    request_row = await pick_candidate(session, request_row, candidate)
+    logger.info(
+        "request_candidate_picked",
+        request_id=request_row.id,
+        user_id=user.id,
+        backend=candidate["backend"],
+    )
     worker = get_worker()
     if worker is not None:
         worker.notify()
