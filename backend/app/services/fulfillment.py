@@ -60,7 +60,9 @@ from app.services.disk_space import insufficient_space_reason
 from app.services.pathsafety import PathSafetyError, render_library_path
 from app.services.qbittorrent import QBittorrentClient
 from app.services.scoring import (
+    QUALITY_LOSSLESS,
     QUALITY_LOSSY,
+    QUALITY_UNKNOWN,
     ScoredCandidate,
     candidate_quality,
     extract_extension,
@@ -115,6 +117,39 @@ def _quality_ask_for_shim(request_row: Request) -> str:
 def _query_for(request_row: Request) -> str:
     parts = [request_row.artist, request_row.title]
     return " ".join(p for p in parts if p)
+
+
+def _summarize(scored: list[ScoredCandidate], *, backend: str) -> list[dict]:
+    """The per-candidate audit-trail record every tier writes to `candidates_considered`.
+
+    Shared rather than repeated per tier because this is no longer only a display record. A
+    requester can pick one of these rows by hand when scoring gets it wrong (see
+    app.services.manual_candidate), and doing that needs three things the old display-only
+    summary threw away:
+
+      * `identifier` -- what the tier actually acts on, and the one field whose meaning
+        differs per backend (a Prowlarr guid, a Soulseek filename, a YouTube video id).
+      * `backend` -- which tier can act on this identifier at all. Stamped per candidate
+        rather than read off the attempt row, so a candidate stays self-describing wherever
+        it is copied to.
+      * `quality` -- what this candidate's audio actually is, so a manual pick can be held to
+        the same lossless contract the automatic path is held to, without re-deriving it from
+        a name at pick time.
+
+    Rows written before this shape existed simply lack the new keys; the resolver refuses
+    those explicitly rather than guessing at an identifier it was never given.
+    """
+    return [
+        {
+            "backend": backend,
+            "identifier": c.identifier,
+            "name": c.raw_name,
+            "similarity": round(c.similarity, 3),
+            "quality": c.quality,
+            "extra": c.extra,
+        }
+        for c in scored
+    ]
 
 
 async def _poll_until_settled(
@@ -361,10 +396,7 @@ async def _try_prowlarr(
         )
         for item in raw
     ]
-    candidates_summary = [
-        {"name": c.raw_name, "similarity": round(c.similarity, 3), "extra": c.extra}
-        for c in scored
-    ]
+    candidates_summary = _summarize(scored, backend="prowlarr")
 
     require_lossless = _requires_lossless(request_row)
     ranked = qualifying_candidates_ranked(scored, require_lossless=require_lossless)
@@ -394,6 +426,41 @@ async def _try_prowlarr(
             ),
         )
         return _TierResult(fulfilled=False)
+
+    return await _run_prowlarr_candidates(
+        session,
+        request_row,
+        settings,
+        staging_dir,
+        ranked=ranked,
+        query=query,
+        candidates_summary=candidates_summary,
+    )
+
+
+async def _run_prowlarr_candidates(
+    session: AsyncSession,
+    request_row: Request,
+    settings: Settings,
+    staging_dir: Path,
+    *,
+    ranked: list[ScoredCandidate],
+    query: str,
+    candidates_summary: list | None,
+) -> _TierResult:
+    """Grab, poll and file Prowlarr candidates in the order given.
+
+    Split out from the search/score half of this tier so a hand-picked candidate can be run
+    through exactly this code (see _try_manual_candidate) rather than through a parallel
+    implementation that would drift from it. The automatic path passes its ranked list; the
+    manual path passes the single candidate the requester chose.
+    """
+    prowlarr = ProwlarrSearchSource(settings.prowlarr_url, settings.prowlarr_api_key)
+    qbt = QBittorrentClient(
+        settings.qbittorrent_url,
+        settings.qbittorrent_username,
+        settings.qbittorrent_password,
+    )
 
     # Try candidates in score order, falling through to the next on any real failure.
     # Bounded: each attempt costs a real download-timeout wait.
@@ -615,10 +682,7 @@ async def _try_slskd(
         )
         for f in files
     ]
-    candidates_summary = [
-        {"name": c.raw_name, "similarity": round(c.similarity, 3), "extra": c.extra}
-        for c in scored
-    ]
+    candidates_summary = _summarize(scored, backend="slskd")
 
     require_lossless = _requires_lossless(request_row)
     ranked = qualifying_candidates_ranked(scored, require_lossless=require_lossless)
@@ -631,6 +695,34 @@ async def _try_slskd(
             candidates_summary=candidates_summary,
             lossy_only=require_lossless and bool(qualifying_candidates_ranked(scored)),
         )
+
+    return await _run_slskd_candidates(
+        session,
+        request_row,
+        settings,
+        staging_dir,
+        ranked=ranked,
+        query=query,
+        candidates_summary=candidates_summary,
+    )
+
+
+async def _run_slskd_candidates(
+    session: AsyncSession,
+    request_row: Request,
+    settings: Settings,
+    staging_dir: Path,
+    *,
+    ranked: list[ScoredCandidate],
+    query: str,
+    candidates_summary: list | None,
+) -> _TierResult:
+    """Enqueue, poll and file Soulseek candidates in the order given.
+
+    Split from this tier's search/score half for the same reason as the Prowlarr equivalent:
+    a hand-picked candidate runs through this exact code rather than a parallel copy of it.
+    """
+    slskd = SlskdClient(settings.slskd_url, settings.slskd_api_key)
 
     # Try candidates in score order, falling through to the next on any real failure (a peer
     # gone offline mid-transfer, a transfer that never completes). Bounded: each attempt costs
@@ -825,10 +917,7 @@ async def _try_ytdlp(
         )
         for r in results
     ]
-    candidates_summary = [
-        {"name": c.raw_name, "similarity": round(c.similarity, 3), "extra": c.extra}
-        for c in scored
-    ]
+    candidates_summary = _summarize(scored, backend="ytdlp")
 
     require_lossless = _requires_lossless(request_row)
     ranked = qualifying_candidates_ranked(scored, require_lossless=require_lossless)
@@ -849,6 +938,35 @@ async def _try_ytdlp(
                 "request, so it declined rather than handing over a lossy file."
             ),
         )
+
+    return await _run_ytdlp_candidates(
+        session,
+        request_row,
+        settings,
+        staging_dir,
+        ranked=ranked,
+        query=query,
+        candidates_summary=candidates_summary,
+    )
+
+
+async def _run_ytdlp_candidates(
+    session: AsyncSession,
+    request_row: Request,
+    settings: Settings,
+    staging_dir: Path,
+    *,
+    ranked: list[ScoredCandidate],
+    query: str,
+    candidates_summary: list | None,
+) -> _TierResult:
+    """Start, poll and file YouTube candidates in the order given.
+
+    Split from this tier's search/score half for the same reason as the other two: the
+    motivating failure for hand-picking happened on this tier, so a manual pick running
+    through anything other than this exact code would be the wrong thing to ship.
+    """
+    ytdlp = YtdlpShimClient(settings.ytdlp_shim_url)
 
     # Try candidates in score order, falling through to the next on any real failure. A
     # candidate can score well and still not pan out for a reason scoring cannot see: this
@@ -975,6 +1093,122 @@ async def _try_ytdlp(
     return _TierResult(fulfilled=False)
 
 
+async def _try_manual_candidate(
+    session: AsyncSession, request_row: Request, settings: Settings, staging_dir: Path
+) -> _TierResult:
+    """Run exactly the candidate the requester pinned, against exactly the tier it came from.
+
+    The override path. Scoring is not consulted at all here: the point of a manual pick is
+    that scoring already got this request wrong, so re-deriving a ranked list and hoping the
+    pinned candidate comes out on top would defeat the feature. The candidate is turned back
+    into a one-element ranked list and handed to the same tier runner the automatic path uses,
+    so a manual pick downloads, files, tags and audits through identical code.
+
+    The pin is consumed before anything is attempted, not after it succeeds. A pinned pick
+    that fails must not be retried forever on every subsequent pass: the requester gets the
+    attempt they asked for, sees the outcome in the audit trail, and can pick again. Leaving
+    it set would also make an ordinary retry silently re-run a stale manual choice.
+    """
+    pinned = request_row.manual_candidate
+    if not pinned:
+        return _TierResult(fulfilled=False)
+
+    request_row.manual_candidate = None
+    await session.commit()
+
+    backend = pinned.get("backend")
+    identifier = pinned.get("identifier")
+    name = pinned.get("name")
+    if not backend or not identifier or not name:
+        # Belt and braces: resolve_manual_candidate guarantees all three, so this only fires
+        # for a row written by something else entirely. Recorded rather than crashed, and the
+        # request falls through to the normal tiers below.
+        await _log_attempt(
+            session,
+            request_row,
+            backend=str(backend or "manual"),
+            query_used=_query_for(request_row),
+            candidates_considered=None,
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.ERROR,
+            detail="Hand-picked candidate was incomplete, falling back to normal scoring",
+        )
+        return _TierResult(fulfilled=False)
+
+    # The lossless contract, enforced once more at the point of action. The route already
+    # refused a lossy pick against an unanswered lossless ask, but a request can change
+    # underneath a pin: it can sit queued while the requester's earlier "accept a lossy copy"
+    # is undone by a rollback, or be re-picked through a future caller that forgets the check.
+    # Refusing here means no code path can hand over a lossy file for a live lossless ask.
+    if _requires_lossless(request_row) and pinned.get("quality") != QUALITY_LOSSLESS:
+        await _log_attempt(
+            session,
+            request_row,
+            backend=str(backend),
+            query_used=_query_for(request_row),
+            candidates_considered=None,
+            chosen_candidate={"name": name, "identifier": identifier},
+            outcome=FulfillmentOutcome.DECLINED_LOSSY_ONLY,
+            detail=(
+                "The hand-picked candidate is not lossless and this request still asks for "
+                "lossless, so Cadence declined it rather than downgrading the request "
+                "silently."
+            ),
+        )
+        return _TierResult(fulfilled=False, lossy_only_matches=True)
+
+    candidate = ScoredCandidate(
+        identifier=identifier,
+        raw_name=name,
+        # Similarity is what scoring would have used to rank this against others, and there
+        # is nothing to rank it against: the requester chose it outright. Recorded as 1.0 so
+        # the audit trail reads as a deliberate, unambiguous pick rather than implying a
+        # fuzzy score that was never consulted.
+        similarity=1.0,
+        format_score=format_rank(extract_extension(name)),
+        matches_preference=True,
+        quality=pinned.get("quality") or QUALITY_UNKNOWN,
+        size_bytes=pinned.get("extra", {}).get("size"),
+        seeders=pinned.get("extra", {}).get("seeders"),
+        extra=pinned.get("extra") or {},
+    )
+
+    runner = {
+        "prowlarr": _run_prowlarr_candidates,
+        "slskd": _run_slskd_candidates,
+        "ytdlp": _run_ytdlp_candidates,
+    }.get(str(backend))
+    if runner is None:
+        await _log_attempt(
+            session,
+            request_row,
+            backend=str(backend),
+            query_used=_query_for(request_row),
+            candidates_considered=None,
+            chosen_candidate=None,
+            outcome=FulfillmentOutcome.ERROR,
+            detail=f"No fulfillment tier named {backend!r} to run the picked candidate on",
+        )
+        return _TierResult(fulfilled=False)
+
+    logger.info(
+        "fulfillment_manual_candidate",
+        request_id=request_row.id,
+        backend=backend,
+        identifier=identifier,
+    )
+    summary = _summarize([candidate], backend=str(backend))
+    return await runner(
+        session,
+        request_row,
+        settings,
+        staging_dir,
+        ranked=[candidate],
+        query=_query_for(request_row),
+        candidates_summary=summary,
+    )
+
+
 async def fulfill_request(
     session: AsyncSession, request_row: Request, settings: Settings
 ) -> None:
@@ -1020,7 +1254,21 @@ async def fulfill_request(
 
     lossy_only_matches = False
     try:
-        for tier in (_try_prowlarr, _try_slskd, _try_ytdlp):
+        # The manual override runs first and, when a pick is pinned, is the only tier that
+        # gets to act: falling through to a normal Prowlarr-first re-score would hand the
+        # requester back the very automatic choice they just overrode. It consumes the pin
+        # itself, so a request with none pinned simply reports "not fulfilled" here and the
+        # ordinary ladder below runs exactly as it always has.
+        had_manual_pick = bool(request_row.manual_candidate)
+        if had_manual_pick:
+            result = await _try_manual_candidate(
+                session, request_row, settings, staging_dir
+            )
+            if result.fulfilled:
+                return
+            lossy_only_matches = lossy_only_matches or result.lossy_only_matches
+
+        for tier in () if had_manual_pick else (_try_prowlarr, _try_slskd, _try_ytdlp):
             result = await tier(session, request_row, settings, staging_dir)
             if result.fulfilled:
                 return

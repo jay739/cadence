@@ -100,6 +100,20 @@ class Request(Base):
         Boolean, nullable=False, default=False, server_default="0"
     )
 
+    # A candidate the requester picked by hand off the audit trail, overriding what scoring
+    # chose. Shape: {"backend", "identifier", "name", "quality", "extra"} -- enough for the
+    # one tier named by `backend` to act on it without re-scoring, and no more.
+    #
+    # Never a client payload written through verbatim: the browser sends only a pointer
+    # (which attempt, which index within its candidates_considered), and the server resolves
+    # that against this request's own FulfillmentAttempt rows, so what lands here is always a
+    # candidate Cadence itself recorded seeing. See app.services.manual_candidate.
+    #
+    # Cleared by the fulfillment pass that consumes it, so a pinned pick is used exactly once
+    # and a later ordinary retry goes back to scoring rather than silently re-running a stale
+    # manual choice.
+    manual_candidate: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     status: Mapped[RequestStatus] = mapped_column(
         Enum(RequestStatus, native_enum=False, length=16),
         default=RequestStatus.PENDING,

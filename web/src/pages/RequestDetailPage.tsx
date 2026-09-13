@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
@@ -44,8 +45,36 @@ export function RequestDetailPage() {
     },
   });
 
+  // Which candidate the in-flight pick is for, so only the row that was actually clicked
+  // shows a pending label rather than every button on the page going busy at once.
+  const [pickTarget, setPickTarget] = useState<{ attemptId: string; index: number } | null>(null);
+
+  const pick = useMutation({
+    mutationFn: ({ attemptId, index }: { attemptId: string; index: number }) => {
+      setPickTarget({ attemptId, index });
+      return api.requests.pickCandidate(id!, attemptId, index);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["request", id] });
+      queryClient.invalidateQueries({ queryKey: ["my-requests"] });
+      // A pick can resolve an awaiting_quality request, which the profile tiles count.
+      queryClient.invalidateQueries({ queryKey: ["profile-stats"] });
+    },
+    onSettled: () => setPickTarget(null),
+  });
+
   if (isLoading) return <p>Loading request…</p>;
   if (isError || !data) return <p className="form-error">Couldn't load this request.</p>;
+
+  // Mirrors the backend's PICKABLE_STATUSES (see app/services/manual_candidate.py). A
+  // fulfilled request is excluded because re-running fulfillment would overwrite the file
+  // already in the library, and a downloading one because a transfer is already in flight;
+  // the server refuses both regardless, this just avoids offering an action that cannot work.
+  const canPick =
+    data.status === "failed" ||
+    data.status === "awaiting_quality" ||
+    data.status === "pending" ||
+    data.status === "approved";
 
   return (
     <div>
@@ -80,6 +109,13 @@ export function RequestDetailPage() {
             {retry.error instanceof ApiError
               ? retry.error.message
               : "Couldn't retry this request. Try again."}
+          </p>
+        )}
+        {pick.isError && (
+          <p className="form-error">
+            {pick.error instanceof ApiError
+              ? pick.error.message
+              : "Couldn't switch to that candidate. Try again."}
           </p>
         )}
 
@@ -178,10 +214,44 @@ export function RequestDetailPage() {
                     {attempt.candidates_considered.length} candidate
                     {attempt.candidates_considered.length === 1 ? "" : "s"} considered
                   </summary>
+                  {canPick && (
+                    <p className="attempt-card__pick-hint">
+                      Cadence picked the top-scoring result. If it chose wrong, pick the right one
+                      and it will download that instead of scoring the search again.
+                    </p>
+                  )}
                   <ul>
                     {attempt.candidates_considered.map((candidate, idx) => (
-                      <li key={idx} className="mono">
-                        {JSON.stringify(candidate)}
+                      <li key={idx} className="candidate-row">
+                        <span className="candidate-row__text">
+                          <span className="mono candidate-row__name">
+                            {candidate.name ?? JSON.stringify(candidate)}
+                          </span>
+                          <span className="candidate-row__meta">
+                            {[
+                              typeof candidate.similarity === "number"
+                                ? `similarity ${candidate.similarity.toFixed(3)}`
+                                : null,
+                              candidate.quality && candidate.quality !== "unknown"
+                                ? candidate.quality
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        </span>
+                        {canPick && candidate.identifier && (
+                          <button
+                            type="button"
+                            className="button button--ghost candidate-row__pick"
+                            disabled={pick.isPending}
+                            onClick={() => pick.mutate({ attemptId: attempt.id, index: idx })}
+                          >
+                            {pick.isPending && pickTarget?.attemptId === attempt.id
+                              ? "Starting…"
+                              : "Use this one"}
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>

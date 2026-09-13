@@ -119,11 +119,25 @@ export interface RequestRecord {
   updated_at: string;
 }
 
+// One entry in an attempt's `candidates_considered`. Every field is optional because this is
+// a historical record: rows written before a field existed simply do not carry it, and the
+// UI has to render those without breaking. `identifier` in particular is what the backend
+// needs to re-run a pick, so a row lacking it cannot be hand-picked (the backend says so, in
+// those words, rather than the client guessing).
+export interface FulfillmentCandidate {
+  backend?: string;
+  identifier?: string;
+  name?: string;
+  similarity?: number;
+  quality?: string;
+  extra?: Record<string, unknown> | null;
+}
+
 export interface FulfillmentAttempt {
   id: string;
   backend: string;
   query_used: string;
-  candidates_considered: unknown[] | null;
+  candidates_considered: FulfillmentCandidate[] | null;
   chosen_candidate: Record<string, unknown> | null;
   outcome: string;
   detail: string | null;
