@@ -56,6 +56,7 @@ from app.models.request import (
 from app.models.user import User
 from app.search_sources.musicbrainz import lookup_recording
 from app.search_sources.prowlarr import ProwlarrSearchSource
+from app.services.disk_space import insufficient_space_reason
 from app.services.pathsafety import PathSafetyError, render_library_path
 from app.services.qbittorrent import QBittorrentClient
 from app.services.scoring import (
@@ -993,6 +994,23 @@ async def fulfill_request(
     # rule) fresh for every fulfillment pass, so a save made through the settings UI after a
     # request was approved is honored on this attempt without a worker/container restart.
     settings = await apply_effective_settings(session, settings)
+
+    # Before anything is searched or grabbed: a full library means this download cannot be
+    # filed no matter which tier finds it, and finding out at filing time wastes the download
+    # and can leave a truncated file where the library scanner will see it.
+    no_room = insufficient_space_reason(
+        settings.music_library_path_resolved, settings.min_free_disk_gb
+    )
+    if no_room:
+        logger.warning(
+            "fulfillment_refused_no_disk_space",
+            request_id=request_row.id,
+            reason=no_room,
+        )
+        request_row.status = RequestStatus.FAILED
+        request_row.failure_reason = no_room
+        await session.commit()
+        return
 
     request_row.status = RequestStatus.DOWNLOADING
     await session.commit()
