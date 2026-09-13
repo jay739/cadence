@@ -80,6 +80,8 @@ async def seed_demo_data(session: AsyncSession) -> None:
             failure_reason=seed.get("failure_reason"),
             final_file_path=seed.get("final_file_path"),
             desired_quality=seed.get("desired_quality", "any"),
+            download_progress_percent=seed.get("download_progress_percent"),
+            download_phase=seed.get("download_phase"),
             created_at=created_at,
             updated_at=created_at,
         )

@@ -115,6 +115,20 @@ export interface RequestRecord {
   failure_reason: string | null;
   final_file_path: string | null;
   fulfillment_attempts_count: number;
+  // Which fulfillment tier actually delivered the file, or null while nothing has been
+  // delivered yet. The raw backend key ("prowlarr" | "slskd" | "ytdlp"), deliberately a plain
+  // string like TierInsight.backend: the server reports whatever tier delivered, and the
+  // requester-facing wording lives in the client (see SourceBadge), the same way StatusBadge
+  // owns the wording for statuses.
+  delivered_by: string | null;
+  // How far along an in-flight download is, 0..100, or null when no honest number exists.
+  // null is NOT 0: only the torrent and Soulseek tiers can report a real fraction, and the
+  // YouTube tier reports none at all, so null means "no number to show" and must never be
+  // rendered as an empty or invented bar.
+  download_progress_percent: number | null;
+  // What is happening right now, in the requester's language ("Receiving from a Soulseek
+  // peer"). The only progress the YouTube tier can honestly give.
+  download_phase: string | null;
   created_at: string;
   updated_at: string;
 }

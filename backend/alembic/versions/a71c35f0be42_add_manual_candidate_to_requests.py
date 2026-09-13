@@ -1,7 +1,7 @@
 """add manual_candidate to requests
 
 Revision ID: a71c35f0be42
-Revises: c3f2b81a47d9
+Revises: a71c5e2f9d34
 Create Date: 2026-09-13 09:12:38.442117
 
 Scoring will always sometimes pick the wrong candidate, and until now a requester who could
@@ -22,7 +22,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a71c35f0be42"
-down_revision: Union[str, Sequence[str], None] = "c3f2b81a47d9"
+down_revision: Union[str, Sequence[str], None] = "a71c5e2f9d34"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

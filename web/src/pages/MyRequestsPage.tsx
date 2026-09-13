@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { DownloadProgress } from "../components/DownloadProgress";
+import { SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import "./ListPages.css";
 
@@ -61,8 +63,22 @@ export function MyRequestsPage() {
                 <div className="request-row__body">
                   <div className="request-row__title">{request.title}</div>
                   <div className="request-row__artist">{request.artist}</div>
+                  {/* Only while something is actually in flight. A finished request showing a
+                      full bar would keep claiming activity after the fact. */}
+                  {request.status === "downloading" && (
+                    <DownloadProgress
+                      percent={request.download_progress_percent}
+                      phase={request.download_phase}
+                    />
+                  )}
                 </div>
-                <StatusBadge status={request.status} />
+                <div className="request-row__badges">
+                  <StatusBadge status={request.status} />
+                  {/* Where it came from is only meaningful once it has arrived. */}
+                  {request.status === "fulfilled" && request.delivered_by && (
+                    <SourceBadge backend={request.delivered_by} />
+                  )}
+                </div>
               </Link>
               {/* The question is asked in full on the request's own page; this is the same
                   answer within reach from the list, since a row that needs a decision is

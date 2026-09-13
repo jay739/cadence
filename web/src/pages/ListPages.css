@@ -45,6 +45,16 @@
   color: inherit;
 }
 
+/* Stacks the status badge and the "from Soulseek" source badge, so a fulfilled row reads
+   top-to-bottom as "Downloaded / from Soulseek" rather than crowding them onto one line. */
+.request-row__badges {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
 .request-row__actions {
   flex-shrink: 0;
   display: flex;

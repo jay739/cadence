@@ -102,22 +102,67 @@ class SlskdClient:
         )
         return resp.status_code < 300
 
-    async def is_download_complete(self, username: str, filename: str) -> bool:
+    async def _transfer_file(self, username: str, filename: str) -> dict | None:
+        """The per-file transfer object slskd holds for this download, or None.
+
+        Shared by `is_download_complete` and `download_progress`: both questions are answered
+        by the same object on the same endpoint, so they read it the same way rather than
+        drifting apart.
+        """
         if not self.configured:
-            return False
+            return None
         resp = await self._http.get(
             f"{self._base_url}/api/v0/transfers/downloads/{username}",
             policy=POLICY_ALLOW_PRIVATE,
             headers=self._headers(),
         )
         if resp.status_code != 200:
-            return False
+            return None
         data = resp.json()
         for directory in data.get("directories", []):
             for f in directory.get("files", []):
                 if f.get("filename") == filename:
-                    # slskd reports composite states like "Completed, Succeeded" or
-                    # "Completed, Errored" - only the former means the file is usable.
-                    state = f.get("state", "").lower()
-                    return "completed" in state and "succeeded" in state
-        return False
+                    return f if isinstance(f, dict) else None
+        return None
+
+    async def is_download_complete(self, username: str, filename: str) -> bool:
+        transfer = await self._transfer_file(username, filename)
+        if transfer is None:
+            return False
+        # slskd reports composite states like "Completed, Succeeded" or
+        # "Completed, Errored" - only the former means the file is usable.
+        state = transfer.get("state", "").lower()
+        return "completed" in state and "succeeded" in state
+
+    async def download_progress(self, username: str, filename: str) -> float | None:
+        """How far along this transfer is, 0..100, or None if slskd did not say.
+
+        Verified against a live slskd 0.26.0.0 rather than assumed: every per-file transfer
+        object carries `percentComplete` (already 0..100) alongside `bytesTransferred`,
+        `size`, `bytesRemaining` and `averageSpeed`. `percentComplete` is preferred because it
+        is slskd's own answer; the byte counts are the fallback for the case where that field
+        is absent (an older daemon, or a transfer slskd has not scored yet), so a missing
+        field degrades to "no number" rather than to a wrong one.
+
+        None, never 0.0, when nothing usable is available: a transfer that has not started and
+        a transfer whose progress cannot be read must not both render as an empty bar.
+        """
+        transfer = await self._transfer_file(username, filename)
+        if transfer is None:
+            return None
+
+        reported = transfer.get("percentComplete")
+        if isinstance(reported, int | float) and not isinstance(reported, bool):
+            return max(0.0, min(100.0, float(reported)))
+
+        transferred = transfer.get("bytesTransferred")
+        size = transfer.get("size")
+        if (
+            isinstance(transferred, int | float)
+            and isinstance(size, int | float)
+            and not isinstance(transferred, bool)
+            and not isinstance(size, bool)
+            and size > 0
+        ):
+            return max(0.0, min(100.0, float(transferred) / float(size) * 100.0))
+        return None

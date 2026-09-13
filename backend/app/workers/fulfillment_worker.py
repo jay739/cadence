@@ -61,7 +61,16 @@ class FulfillmentWorker:
             result = await session.execute(
                 update(Request)
                 .where(Request.status == RequestStatus.DOWNLOADING)
-                .values(status=RequestStatus.APPROVED, worker_lock_token=None)
+                .values(
+                    status=RequestStatus.APPROVED,
+                    worker_lock_token=None,
+                    # The progress these rows carry describes a transfer that died with the
+                    # previous worker. Since recovery re-evaluates from scratch rather than
+                    # resuming, leaving "62%, receiving from a Soulseek peer" on the row would
+                    # report a download that is not running and will never resume.
+                    download_progress_percent=None,
+                    download_phase=None,
+                )
             )
             await session.commit()
             # UPDATE statements yield a CursorResult at runtime, which has .rowcount; the
