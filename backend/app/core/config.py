@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     # See app.core.limiter.auth_rate_limit.
     auth_rate_limit: str = Field(default="10/minute", alias="AUTH_RATE_LIMIT")
 
+    # A floor on free space in the music library, checked before a download starts. A full
+    # pool otherwise fails late and messily: bandwidth and indexer budget already spent, and
+    # the error surfacing as a write failure at filing time. 0 disables the check.
+    min_free_disk_gb: float = Field(default=5.0, alias="MIN_FREE_DISK_GB")
+
     # --- Outbound HTTP behavior ---
     outbound_timeout_seconds: float = Field(
         default=8.0, alias="OUTBOUND_TIMEOUT_SECONDS"

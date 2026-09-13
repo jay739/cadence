@@ -1597,3 +1597,44 @@ class TestWebhookFiresOnFulfilled:
 
         assert request_row.status == RequestStatus.FAILED
         assert httpx_mock.get_requests() == []
+
+
+class TestRefusesWhenTheLibraryIsFull:
+    """A full pool cannot be fixed by trying harder. Finding out at filing time means the
+    download, the indexer budget and the bandwidth are already spent, and a partial write can
+    leave a truncated file where the library scanner will happily index it."""
+
+    async def test_refuses_before_touching_any_backend(
+        self, fulfillment_db, tmp_path, httpx_mock
+    ):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+        # Prowlarr IS configured here on purpose: registering no mocked response means
+        # pytest_httpx fails loudly on any outbound call, so this proves the refusal happens
+        # before a single request goes out, not merely that the end state is FAILED.
+        settings = _settings(
+            tmp_path,
+            PROWLARR_URL="http://localhost:19696",
+            PROWLARR_API_KEY="key",
+            MIN_FREE_DISK_GB=10_000_000,  # more than any real filesystem has
+        )
+
+        await fulfill_request(session, request_row, settings)
+
+        assert request_row.status == RequestStatus.FAILED
+        assert httpx_mock.get_requests() == []
+        # Actionable, not just "failed": what is free, what was required, and the knob to change.
+        assert "GB free" in request_row.failure_reason
+        assert "MIN_FREE_DISK_GB" in request_row.failure_reason
+
+    async def test_zero_threshold_disables_the_guard(self, fulfillment_db, tmp_path):
+        session, user = fulfillment_db
+        request_row = await _make_request(session, user)
+        settings = _settings(tmp_path, MIN_FREE_DISK_GB=0)
+
+        await fulfill_request(session, request_row, settings)
+
+        # Nothing is configured, so it still fails -- but for the ordinary reason, having
+        # actually tried, rather than being refused up front on disk space.
+        assert request_row.status == RequestStatus.FAILED
+        assert "MIN_FREE_DISK_GB" not in (request_row.failure_reason or "")
