@@ -193,29 +193,94 @@ const resolvedTrack: TrackResult = {
   guid: null,
 };
 
-describe("SearchPage paste-a-link", () => {
+const SPOTIFY_LINK = "https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y";
+
+/**
+ * The one search box has to pick a behaviour from what's in it: resolve a link, or search for
+ * words. These cover both the branch itself and the thing that makes the merge safe: a link is
+ * never looked up as-you-type, because every prefix of a URL is an unrecognized link and would
+ * earn the user one 422 per keystroke.
+ */
+describe("SearchPage unified box: link vs free text", () => {
   beforeEach(() => {
+    FakeEventSource.instances = [];
     mockedApi.search.resolveLink.mockReset();
   });
 
-  function typeLink(text: string) {
-    fireEvent.change(screen.getByRole("textbox", { name: /paste a spotify or apple music/i }), {
-      target: { value: text },
-    });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function pasteQuery(text: string) {
+    const box = screen.getByRole("searchbox");
+    fireEvent.paste(box);
+    fireEvent.change(box, { target: { value: text } });
   }
 
-  it("resolves a pasted link and renders it with the existing TrackCard", async () => {
+  it("resolves a pasted link on its own and renders it with the existing TrackCard", async () => {
     mockedApi.search.resolveLink.mockResolvedValue(resolvedTrack);
     renderSearchPage();
 
-    typeLink("https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y");
-    fireEvent.click(screen.getByRole("button", { name: /resolve link/i }));
+    // No submit: a paste is a complete link the moment it lands, so it settles into a lookup.
+    pasteQuery(SPOTIFY_LINK);
 
     expect(await screen.findByText("Tum Hi Ho")).toBeInTheDocument();
     expect(screen.getByText("Arijit Singh")).toBeInTheDocument();
-    expect(mockedApi.search.resolveLink).toHaveBeenCalledWith(
-      "https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y",
-    );
+    expect(mockedApi.search.resolveLink).toHaveBeenCalledWith(SPOTIFY_LINK);
+    // A URL is never fanned out to the four search sources as if it were a song title.
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it("never looks a link up mid-typing, only on submit", async () => {
+    vi.useFakeTimers();
+    mockedApi.search.resolveLink.mockResolvedValue(resolvedTrack);
+    renderSearchPage();
+
+    // Typed by hand, one keystroke at a time, waiting out the debounce after every one.
+    for (const prefix of [
+      "h",
+      "ht",
+      "https://",
+      "https://open.spotify.com/tr",
+      "https://open.spotify.com/track/6y0",
+      SPOTIFY_LINK,
+    ]) {
+      typeQuery(prefix);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+    }
+
+    expect(mockedApi.search.resolveLink).not.toHaveBeenCalled();
+    // …and the half-typed URL was never sent to the search sources either.
+    expect(FakeEventSource.instances.some((s) => s.url.includes("spotify.com"))).toBe(false);
+    // The one button says which of the two things it is about to do.
+    expect(screen.getByRole("button", { name: "Resolve link" })).toBeInTheDocument();
+  });
+
+  it("submits a hand-typed link as a lookup, not as a search", async () => {
+    mockedApi.search.resolveLink.mockResolvedValue(resolvedTrack);
+    renderSearchPage();
+
+    typeQuery(SPOTIFY_LINK);
+    fireEvent.click(screen.getByRole("button", { name: "Resolve link" }));
+
+    expect(await screen.findByText("Tum Hi Ho")).toBeInTheDocument();
+    expect(mockedApi.search.resolveLink).toHaveBeenCalledTimes(1);
+    expect(mockedApi.search.resolveLink).toHaveBeenCalledWith(SPOTIFY_LINK);
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it("adds the scheme a mobile share sheet leaves off a known host", async () => {
+    mockedApi.search.resolveLink.mockResolvedValue(resolvedTrack);
+    renderSearchPage();
+
+    pasteQuery("open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y");
+
+    // Without this the backend would reject a perfectly good link for having no scheme, with a
+    // message about the wrong platform.
+    await screen.findByText("Tum Hi Ho");
+    expect(mockedApi.search.resolveLink).toHaveBeenCalledWith(SPOTIFY_LINK);
   });
 
   it("shows the backend's specific error message inline, not a toast or a generic message", async () => {
@@ -228,13 +293,15 @@ describe("SearchPage paste-a-link", () => {
     );
     renderSearchPage();
 
-    typeLink("https://youtube.com/watch?v=dQw4w9WgXcQ");
-    fireEvent.click(screen.getByRole("button", { name: /resolve link/i }));
+    // A link to a platform the backend doesn't resolve still goes to the resolver, so the user
+    // reads why, instead of watching four search sources find nothing for a URL.
+    pasteQuery("https://youtube.com/watch?v=dQw4w9WgXcQ");
 
     expect(
       await screen.findByText("That doesn't look like a Spotify or Apple Music track link"),
     ).toBeInTheDocument();
     expect(screen.queryByText("Tum Hi Ho")).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
   });
 
   it("shows a specific 404 message when the platform is recognized but the track isn't found", async () => {
@@ -247,23 +314,37 @@ describe("SearchPage paste-a-link", () => {
     );
     renderSearchPage();
 
-    typeLink("https://open.spotify.com/track/0000000000000000000000");
-    fireEvent.click(screen.getByRole("button", { name: /resolve link/i }));
+    pasteQuery("https://open.spotify.com/track/0000000000000000000000");
 
     expect(await screen.findByText("Couldn't find that track on Spotify")).toBeInTheDocument();
   });
 
-  it("clears a previous error once a new link is typed", async () => {
+  it("clears a previous error once the box is edited", async () => {
     mockedApi.search.resolveLink.mockRejectedValue(
       new ApiError(422, { detail: "Bad link" }, "Bad link"),
     );
     renderSearchPage();
 
-    typeLink("https://example.com/not-a-track");
-    fireEvent.click(screen.getByRole("button", { name: /resolve link/i }));
+    pasteQuery("https://example.com/not-a-track");
     expect(await screen.findByText("Bad link")).toBeInTheDocument();
 
-    typeLink("https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y");
+    typeQuery(SPOTIFY_LINK);
     expect(screen.queryByText("Bad link")).not.toBeInTheDocument();
+  });
+
+  it("stands the source tabs down for a link and brings them back for words", async () => {
+    mockedApi.search.resolveLink.mockResolvedValue(resolvedTrack);
+    renderSearchPage();
+
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
+
+    pasteQuery(SPOTIFY_LINK);
+    await screen.findByText("Tum Hi Ho");
+    // The four per-source tabs have nothing to say about one exact link.
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+
+    typeQuery("tum hi ho");
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
   });
 });

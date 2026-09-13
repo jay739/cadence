@@ -137,83 +137,56 @@ function SearchResultsPanel({
   );
 }
 
-interface ResolveLinkPanelProps {
+interface LinkResultPanelProps {
+  track: TrackResult | null;
+  error: string | null;
+  isResolving: boolean;
   onRequest: (track: TrackResult, desiredQuality: DesiredQuality) => Promise<void>;
   requestStates: Record<string, RequestState>;
 }
 
 /**
- * Lets a user paste a direct Spotify or Apple Music track link and resolve it to one exact
- * track, as an alternative to the free-text search above for someone who already knows
- * precisely which recording they want. Only these two platforms are supported today (see
- * backend/app/services/link_resolve.py for why YouTube links are out of scope).
+ * What the results area shows while the one search box holds a link rather than words: the
+ * single exact track that link resolves to, for someone who already knows precisely which
+ * recording they want. The four per-source tabs have nothing useful to say about an exact
+ * link, so they stand down for this mode instead of streaming a nonsense query.
  *
- * Deliberately separate from useSearchStream's per-query state: a resolved link is a single
- * one-shot lookup, not a stream of per-source results, so a plain useMutation plus local state
- * covers it without the remount trick the search results panel needs.
+ * Only Spotify and Apple Music links resolve (see backend/app/services/link_resolve.py for why
+ * YouTube links are out of scope). A link from anywhere else still lands here rather than in
+ * the search stream, so the backend's specific "that isn't a Spotify or Apple Music track
+ * link" message is what the user reads, inline, right where they pasted it.
+ *
+ * Deliberately outside useSearchStream's per-query state: a resolved link is a single one-shot
+ * lookup, not a stream of per-source results, so plain state in the page covers it without the
+ * remount trick the search results panel needs.
  */
-function ResolveLinkPanel({ onRequest, requestStates }: ResolveLinkPanelProps) {
-  const [linkUrl, setLinkUrl] = useState("");
-  const [linkError, setLinkError] = useState<string | null>(null);
-  const [resolvedTrack, setResolvedTrack] = useState<TrackResult | null>(null);
-  // Someone who pasted an exact link is the likeliest person to already own the track, so this
-  // panel gets the same library badge the search results do.
-  const resolvedTracks = useMemo(
-    () => (resolvedTrack ? [resolvedTrack] : EMPTY_RESULTS),
-    [resolvedTrack],
-  );
+function LinkResultPanel({
+  track,
+  error,
+  isResolving,
+  onRequest,
+  requestStates,
+}: LinkResultPanelProps) {
+  // Someone who pasted an exact link is the likeliest person to already own the track, so a
+  // resolved link gets the same library badge the search results do.
+  const resolvedTracks = useMemo(() => (track ? [track] : EMPTY_RESULTS), [track]);
   const libraryStatus = useLibraryStatus(resolvedTracks);
 
-  const resolveLinkMutation = useMutation({
-    mutationFn: (url: string) => api.search.resolveLink(url),
-  });
-
-  async function handleResolveLink(event: FormEvent) {
-    event.preventDefault();
-    const trimmed = linkUrl.trim();
-    if (!trimmed) return;
-    setLinkError(null);
-    try {
-      const track = await resolveLinkMutation.mutateAsync(trimmed);
-      setResolvedTrack(track);
-    } catch (err) {
-      setResolvedTrack(null);
-      setLinkError(
-        err instanceof ApiError ? err.message : "Couldn't resolve that link. Try again.",
-      );
-    }
-  }
-
   return (
-    <div className="link-resolve">
-      <form className="link-resolve-form" onSubmit={handleResolveLink}>
-        <input
-          type="url"
-          placeholder="…or paste a Spotify or Apple Music track link"
-          aria-label="Paste a Spotify or Apple Music track link"
-          value={linkUrl}
-          onChange={(e) => {
-            setLinkUrl(e.target.value);
-            setLinkError(null);
-          }}
-        />
-        <button
-          type="submit"
-          className="button button--ghost"
-          disabled={!linkUrl.trim() || resolveLinkMutation.isPending}
-        >
-          {resolveLinkMutation.isPending ? "Resolving…" : "Resolve link"}
-        </button>
-      </form>
-      {linkError && <p className="form-error">{linkError}</p>}
-      {resolvedTrack && (
+    <div className="card search-results">
+      {error && <p className="form-error">{error}</p>}
+      {isResolving && <p>Looking up that link…</p>}
+      {!error && !isResolving && !track && (
+        <div className="empty-state">That looks like a track link. Press Enter to look it up.</div>
+      )}
+      {track && (
         <ul className="track-list">
           <TrackCard
-            key={trackKey(resolvedTrack)}
-            track={resolvedTrack}
+            key={trackKey(track)}
+            track={track}
             onRequest={onRequest}
-            requestState={requestStates[trackKey(resolvedTrack)] ?? "idle"}
-            libraryMatch={libraryStatus[trackKey(resolvedTrack)]}
+            requestState={requestStates[trackKey(track)] ?? "idle"}
+            libraryMatch={libraryStatus[trackKey(track)]}
           />
         </ul>
       )}
@@ -221,28 +194,76 @@ function ResolveLinkPanel({ onRequest, requestStates }: ResolveLinkPanelProps) {
   );
 }
 
+// The hosts the backend can actually resolve today (backend/app/services/link_resolve.py:
+// Spotify and Apple Music, YouTube deliberately deferred). Used only to recognize a
+// scheme-less paste; the backend re-parses and re-validates every URL it is given.
+const TRACK_LINK_HOSTS = ["open.spotify.com", "music.apple.com"];
+
+/**
+ * Decides which of the one search box's two behaviours the current input gets: resolve a link,
+ * or search for words. Deliberately blunt.
+ *
+ * Anything explicitly http(s) counts, whatever the host, because a YouTube or Bandcamp link is
+ * a link, and sending it to the resolver earns the backend's specific "that doesn't look like
+ * a Spotify or Apple Music track link" rejection, which is far more useful than fanning a URL
+ * out to four search APIs as if it were a song title. A scheme-less paste of a host the
+ * backend knows counts too, since that is what several mobile share sheets hand over.
+ */
+function looksLikeTrackLink(value: string): boolean {
+  const candidate = value.trim().toLowerCase();
+  if (candidate.startsWith("http://") || candidate.startsWith("https://")) return true;
+  return TRACK_LINK_HOSTS.some((host) => candidate.startsWith(`${host}/`));
+}
+
+/**
+ * The backend only accepts an http(s) URL (parse_track_link's scheme check), so a scheme-less
+ * paste gets the scheme added here. Otherwise a perfectly good `open.spotify.com/track/…`
+ * would come back rejected as "not a Spotify link", which is both wrong and unactionable.
+ */
+function normalizeTrackLink(value: string): string {
+  const trimmed = value.trim();
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 // As-you-type tuning: long enough that a fast typist doesn't fire a stream per keystroke,
 // short enough that results feel immediate once they pause; 2-char minimum keeps one-letter
 // junk queries from fanning out to four real APIs.
 const SEARCH_DEBOUNCE_MS = 400;
 const MIN_SEARCH_CHARS = 2;
+// A link is never looked up as-you-type: every prefix of a real URL is an unrecognized link,
+// so a typing debounce would earn the user one 422 per keystroke. A *paste* arrives whole in a
+// single change event, so this short settle is not a typing debounce at all: it exists only so
+// that carrying on typing (or pasting again) straight after a paste cancels the lookup rather
+// than racing it. Everything else waits for an explicit submit.
+const LINK_PASTE_SETTLE_MS = 250;
 
 export function SearchPage() {
   const [query, setQuery] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("apple");
   const [requestStates, setRequestStates] = useState<Record<string, RequestState>>({});
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [resolvedTrack, setResolvedTrack] = useState<TrackResult | null>(null);
   const queryClient = useQueryClient();
-  const debounceTimer = useRef<number | null>(null);
+  const pendingLookup = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Set by the paste handler and consumed by the change handler that immediately follows it,
+  // so the change handler can tell "the whole URL just arrived at once" from "the user is
+  // typing a URL character by character", since only the former ever auto-resolves.
+  const pastedIntoBox = useRef(false);
+  // Monotonic id for link lookups: with a paste able to fire one on its own, two can be in
+  // flight at once (paste, edit, paste again), and the slower one must not overwrite the newer
+  // one's result. Any input change bumps it, which also discards a lookup the user has moved on
+  // from.
+  const lookupSequence = useRef(0);
 
-  // Cleanup-only effect: a pending debounce timer must not fire after unmount. All setState
-  // calls live in event handlers and the timer callback, never in an effect body, per this
-  // project's strict react-hooks v7 lint rules.
+  // Cleanup-only effect: a pending debounce/paste-settle timer must not fire after unmount. All
+  // setState calls live in event handlers and the timer callback, never in an effect body, per
+  // this project's strict react-hooks v7 lint rules.
   useEffect(() => {
     return () => {
-      if (debounceTimer.current !== null) {
-        window.clearTimeout(debounceTimer.current);
+      if (pendingLookup.current !== null) {
+        window.clearTimeout(pendingLookup.current);
       }
     };
   }, []);
@@ -296,13 +317,57 @@ export function SearchPage() {
     }
   }
 
-  function handleQueryChange(next: string) {
-    setQuery(next);
-    if (debounceTimer.current !== null) {
-      window.clearTimeout(debounceTimer.current);
+  const resolveLinkMutation = useMutation({
+    mutationFn: (url: string) => api.search.resolveLink(url),
+  });
+
+  async function resolveLink(rawUrl: string) {
+    const lookupId = ++lookupSequence.current;
+    setLinkError(null);
+    setResolvedTrack(null);
+    try {
+      const track = await resolveLinkMutation.mutateAsync(normalizeTrackLink(rawUrl));
+      if (lookupSequence.current !== lookupId) return;
+      setResolvedTrack(track);
+    } catch (err) {
+      if (lookupSequence.current !== lookupId) return;
+      setResolvedTrack(null);
+      // The backend's own wording, verbatim: a 422 names the platform it couldn't recognize and
+      // a 404 names the platform it asked, both of which tell the user what to do next. Shown
+      // inline under the box they pasted into, never as a toast that outlives the input.
+      setLinkError(
+        err instanceof ApiError ? err.message : "Couldn't resolve that link. Try again.",
+      );
     }
+  }
+
+  function handleQueryChange(next: string) {
+    const wholeValueJustPasted = pastedIntoBox.current;
+    pastedIntoBox.current = false;
+    setQuery(next);
+    // Anything the user types invalidates the last lookup's result, whether or not it has
+    // landed yet.
+    lookupSequence.current += 1;
+    setLinkError(null);
+    setResolvedTrack(null);
+    if (pendingLookup.current !== null) {
+      window.clearTimeout(pendingLookup.current);
+    }
+
     const trimmed = next.trim();
-    debounceTimer.current = window.setTimeout(() => {
+    if (looksLikeTrackLink(trimmed)) {
+      // A URL is never a useful free-text query, so stop the streaming search rather than
+      // fanning one out to four real APIs, and drop any results still on screen from before.
+      setActiveQuery("");
+      if (wholeValueJustPasted) {
+        pendingLookup.current = window.setTimeout(() => {
+          void resolveLink(trimmed);
+        }, LINK_PASTE_SETTLE_MS);
+      }
+      return;
+    }
+
+    pendingLookup.current = window.setTimeout(() => {
       setActiveQuery(trimmed.length >= MIN_SEARCH_CHARS ? trimmed : "");
     }, SEARCH_DEBOUNCE_MS);
   }
@@ -311,11 +376,20 @@ export function SearchPage() {
     event.preventDefault();
     // Instant flush: pressing Enter or the button skips the debounce wait, and also allows a
     // deliberate one-character search the as-you-type minimum would otherwise hold back.
-    if (debounceTimer.current !== null) {
-      window.clearTimeout(debounceTimer.current);
+    if (pendingLookup.current !== null) {
+      window.clearTimeout(pendingLookup.current);
     }
-    setActiveQuery(query.trim());
+    const trimmed = query.trim();
+    if (looksLikeTrackLink(trimmed)) {
+      void resolveLink(trimmed);
+      return;
+    }
+    setActiveQuery(trimmed);
   }
+
+  // One box, two behaviours, decided by what's in it rather than by which of two boxes the user
+  // picked: a link resolves to one exact track, anything else searches across the four sources.
+  const isLinkMode = looksLikeTrackLink(query);
 
   return (
     <div>
@@ -323,7 +397,8 @@ export function SearchPage() {
         <h1>Find a track</h1>
         <p>
           Results appear as you type, across four sources at once. Pick the right result, complete
-          with source badge and art, and request just that one recording.
+          with source badge and art, and request just that one recording. Already know the exact
+          recording? Paste its Spotify or Apple Music link into the same box.
         </p>
       </div>
 
@@ -331,26 +406,41 @@ export function SearchPage() {
         <input
           ref={searchInputRef}
           type="search"
-          placeholder="Start typing a track title or artist… (press / to focus)"
-          aria-label="Search for a track"
+          placeholder="Track title or artist, or paste a track link… (press / to focus)"
+          aria-label="Search for a track, or paste a Spotify or Apple Music link"
           value={query}
           onChange={(e) => handleQueryChange(e.target.value)}
+          onPaste={() => {
+            pastedIntoBox.current = true;
+          }}
         />
-        <button type="submit" className="button button--primary" disabled={!query.trim()}>
-          Search
+        <button
+          type="submit"
+          className="button button--primary"
+          disabled={!query.trim() || resolveLinkMutation.isPending}
+        >
+          {isLinkMode ? (resolveLinkMutation.isPending ? "Resolving…" : "Resolve link") : "Search"}
         </button>
       </form>
 
-      <ResolveLinkPanel onRequest={handleRequest} requestStates={requestStates} />
-
-      <SearchResultsPanel
-        key={activeQuery}
-        query={activeQuery}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onRequest={handleRequest}
-        requestStates={requestStates}
-      />
+      {isLinkMode ? (
+        <LinkResultPanel
+          track={resolvedTrack}
+          error={linkError}
+          isResolving={resolveLinkMutation.isPending}
+          onRequest={handleRequest}
+          requestStates={requestStates}
+        />
+      ) : (
+        <SearchResultsPanel
+          key={activeQuery}
+          query={activeQuery}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onRequest={handleRequest}
+          requestStates={requestStates}
+        />
+      )}
     </div>
   );
 }
