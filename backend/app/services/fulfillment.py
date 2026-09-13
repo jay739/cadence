@@ -54,7 +54,6 @@ from app.models.request import (
     RequestStatus,
 )
 from app.models.user import User
-from app.search_sources.musicbrainz import lookup_recording
 from app.search_sources.prowlarr import ProwlarrSearchSource
 from app.services.disk_space import insufficient_space_reason
 from app.services.pathsafety import PathSafetyError, render_library_path
@@ -71,7 +70,7 @@ from app.services.scoring import (
 )
 from app.services.settings_store import apply_effective_settings
 from app.services.slskd import SlskdClient
-from app.services.tagging import write_tags
+from app.services.tagging import collect_track_tags, write_tags
 from app.services.webhook_delivery import notify_webhook
 from app.services.ytdlp_shim import YtdlpShimClient
 
@@ -307,26 +306,14 @@ async def _finalize_file(
     else:
         shutil.move(str(source_file), str(dest))
 
-    tag_title, tag_artist, tag_album = (
-        request_row.title,
-        request_row.artist,
-        request_row.album,
+    tags = await collect_track_tags(
+        title=request_row.title,
+        artist=request_row.artist,
+        album=request_row.album,
+        musicbrainz_recording_id=request_row.musicbrainz_recording_id,
     )
-    if request_row.musicbrainz_recording_id:
-        try:
-            mb_data = await lookup_recording(request_row.musicbrainz_recording_id)
-            if mb_data:
-                tag_title = mb_data.get("title", tag_title)
-                credits = mb_data.get("artist-credit") or []
-                if credits:
-                    tag_artist = credits[0]["artist"]["name"]
-                releases = mb_data.get("releases") or []
-                if releases:
-                    tag_album = releases[0].get("title", tag_album)
-        except Exception as exc:  # noqa: BLE001 - tagging metadata is best-effort
-            logger.warning("musicbrainz_tag_lookup_failed", error=str(exc))
 
-    write_tags(dest, title=tag_title, artist=tag_artist, album=tag_album)
+    write_tags(dest, title=tags.title, artist=tags.artist, album=tags.album, tags=tags)
 
     request_row.status = RequestStatus.FULFILLED
     request_row.final_file_path = str(
