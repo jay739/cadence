@@ -5,6 +5,25 @@
   max-width: 640px;
 }
 
+/* Same restraint as .profile-section: these are panels to work inside, so the shadow deepens
+   on hover and the edge only warms once a field within has focus. Nothing moves. */
+.settings-section {
+  transition:
+    border-color var(--motion-hover) var(--ease-out-soft),
+    box-shadow var(--motion-hover) var(--ease-out-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings-section:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+}
+
+.settings-section:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  box-shadow: var(--shadow-card-hover);
+}
+
 .settings-section__header {
   margin-bottom: var(--space-4);
 }
@@ -28,6 +47,17 @@
   border: 1px solid var(--color-line);
   border-radius: var(--radius-sm);
   background: var(--color-bg-inset);
+  transition: border-color var(--motion-hover) var(--ease-out-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings-source-preference:hover {
+    border-color: var(--color-text-faint);
+  }
+}
+
+.settings-source-preference:focus-within {
+  border-color: var(--color-accent);
 }
 
 .settings-source-preference legend {

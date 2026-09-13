@@ -9,22 +9,45 @@
   background: var(--color-bg-raised);
   color: var(--color-text);
   cursor: pointer;
+
+  /*
+    The hover tilt and the press dip are composed out of two custom properties instead of being
+    written as two competing `transform` declarations. Written the obvious way, a bare
+    `.theme-toggle:active { transform: scale(...) }` does not add to the hover rule, it replaces
+    it -- identical specificity, later in the file -- and since a button being pressed is also
+    being hovered, the rotation was thrown away at the exact moment the user was looking at it.
+    Routing both through one transform keeps them additive. The transition still interpolates:
+    substituting a changed variable changes the computed value of `transform`, and `transform`
+    is what is being transitioned, not the variables.
+  */
+  --toggle-spin: 0deg;
+  --toggle-press: 1;
+  transform: rotate(var(--toggle-spin)) scale(var(--toggle-press));
   transition:
-    background-color 0.25s ease-out,
-    color 0.25s ease-out,
-    border-color 0.25s ease-out,
-    transform 0.12s ease-out;
+    background-color var(--motion-hover) var(--ease-out-soft),
+    color var(--motion-hover) var(--ease-out-soft),
+    border-color var(--motion-hover) var(--ease-out-soft),
+    transform 240ms var(--ease-out-soft);
 }
 
+/* Hover-only, so a tap on a phone doesn't leave the button parked at an angle until something
+   else is touched. */
 @media (hover: hover) and (pointer: fine) {
   .theme-toggle:hover {
-    transform: rotate(12deg);
+    /*
+      The reference site's 12deg cannot be seen here. The button's own outline is a circle, so
+      the only thing capable of showing rotation is the icon inside it, and the sun's rays
+      repeat every 45deg -- which puts the most legible tilt at half of that, around 22deg,
+      where the icon sits as far as it can from looking upright. Past ~30deg it starts reading
+      as approaching the next ray rather than as a tilt, so bigger is not clearer here.
+    */
+    --toggle-spin: 24deg;
     border-color: var(--color-accent-strong);
   }
 }
 
 .theme-toggle:active {
-  transform: scale(0.94);
+  --toggle-press: 0.94;
 }
 
 .theme-toggle__icon {
@@ -36,11 +59,26 @@
 .theme-toggle__icon svg {
   position: absolute;
   inset: 0;
+  /*
+    Opacity deliberately finishes long before the rotation does. With both on the same 0.4s the
+    outgoing icon had already faded to nothing a third of the way round its arc and the incoming
+    one was still barely visible for most of its own, so a 90deg sweep arrived as a plain
+    crossfade: the rotation was there in the computed style, and there was no moment at which
+    anybody could see it. Fading quickly and turning slowly means the incoming icon reaches full
+    strength early and then visibly swings the rest of the way into place.
+  */
   transition:
-    transform 0.4s ease,
-    opacity 0.4s ease;
+    transform 420ms var(--ease-out-soft),
+    opacity 200ms ease-out;
 }
 
+/*
+  Light is the resting state: the sun upright, the moon waiting a third of a turn behind it.
+  A 120deg sweep rather than the reference's 90deg because this arc has to survive being scaled
+  down while it travels -- at 90deg and half size the turn reads as a wobble. Both icons travel
+  the same way round (the sun leaves clockwise, the moon arrives clockwise), so the handover
+  reads as one continuous sweep rather than two icons turning against each other.
+*/
 .theme-toggle__sun {
   opacity: 1;
   transform: rotate(0deg) scale(1);
@@ -48,12 +86,12 @@
 
 .theme-toggle__moon {
   opacity: 0;
-  transform: rotate(-90deg) scale(0.5);
+  transform: rotate(-120deg) scale(0.55);
 }
 
 :root[data-theme="dark"] .theme-toggle__sun {
   opacity: 0;
-  transform: rotate(90deg) scale(0.5);
+  transform: rotate(120deg) scale(0.55);
 }
 
 :root[data-theme="dark"] .theme-toggle__moon {
