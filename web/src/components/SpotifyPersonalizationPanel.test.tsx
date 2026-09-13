@@ -42,12 +42,8 @@ function healthWithSpotify(configured: boolean) {
     version: "0.1.0",
     mode: "live" as const,
     database_ok: true,
-    integrations: {
-      prowlarr: { configured: false, reachable: null },
-      qbittorrent: { configured: false, reachable: null },
-      slskd: { configured: false, reachable: null },
-      spotify: { configured, reachable: null },
-    },
+    navidrome_login_available: false,
+    spotify_search_available: configured,
   };
 }
 

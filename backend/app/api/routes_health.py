@@ -5,10 +5,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_app_settings, get_db
+from app.api.deps import get_app_settings, get_db, require_admin
 from app.core.config import Settings
 from app.core.safe_http import POLICY_ALLOW_PRIVATE, SafeHttpClient, SafeHttpError
-from app.schemas.health import HealthOut, IntegrationStatus
+from app.models.user import User
+from app.schemas.health import HealthOut, IntegrationsHealthOut, IntegrationStatus
 from app.services.navidrome_library import NavidromeLibraryClient
 from app.services.settings_store import apply_effective_settings
 
@@ -31,7 +32,39 @@ async def health(
     settings: Settings = Depends(get_app_settings),
     session: AsyncSession = Depends(get_db),
 ) -> HealthOut:
-    """Version, mode, DB status, and per-integration configured/reachable booleans.
+    """Liveness, plus the two capability bits the pre-login UI needs. No authentication.
+
+    Deliberately does NOT probe any integration. Besides not disclosing the operator's stack,
+    the probes themselves were the bigger problem: every anonymous hit on this route used to
+    fan out five outbound requests to internal hosts, which is a free way for anyone who can
+    reach the port to make the server hammer its own network. Probing now happens only on the
+    admin route below.
+    """
+    database_ok = True
+    try:
+        await session.execute(text("SELECT 1"))
+    except Exception:  # noqa: BLE001
+        database_ok = False
+
+    if not settings.demo_mode and database_ok:
+        settings = await apply_effective_settings(session, settings)
+
+    return HealthOut(
+        version=settings.version,
+        mode="demo" if settings.demo_mode else "live",
+        database_ok=database_ok,
+        navidrome_login_available=bool(settings.navidrome_url),
+        spotify_search_available=settings.spotify_configured,
+    )
+
+
+@router.get("/health/integrations", response_model=IntegrationsHealthOut)
+async def integrations_health(
+    _admin: User = Depends(require_admin),
+    settings: Settings = Depends(get_app_settings),
+    session: AsyncSession = Depends(get_db),
+) -> IntegrationsHealthOut:
+    """Per-integration configured/reachable detail, for the admin settings surfaces.
 
     Never leaks URLs, keys, or filesystem paths, per the mission's explicit requirement.
     """
@@ -41,8 +74,8 @@ async def health(
     except Exception:  # noqa: BLE001
         database_ok = False
 
-    # DB-stored admin settings must be reflected here too (not just env vars), since /api/health
-    # is how the rest of the app (and any future native client) knows what is actually usable.
+    # DB-stored admin settings must be reflected here too (not just env vars), since this is
+    # how the admin UI knows what is actually usable.
     if not settings.demo_mode and database_ok:
         settings = await apply_effective_settings(session, settings)
 
@@ -51,9 +84,6 @@ async def health(
         "qbittorrent": IntegrationStatus(configured=settings.qbittorrent_configured),
         "slskd": IntegrationStatus(configured=settings.slskd_configured),
         "spotify": IntegrationStatus(configured=settings.spotify_configured),
-        # Read pre-login, by the login page, to decide whether a "sign in with Navidrome"
-        # option is even offered. Just a boolean: no host or credential detail, same as
-        # every other entry here.
         "navidrome": IntegrationStatus(configured=bool(settings.navidrome_url)),
         # The optional Navidrome service account behind the already-in-library check. Separate
         # from "navidrome" above because the two are independently useful: sign-in works with no
@@ -96,9 +126,6 @@ async def health(
                 f"{settings.ytdlp_shim_url.rstrip('/')}/health"
             )
 
-    return HealthOut(
-        version=settings.version,
-        mode="demo" if settings.demo_mode else "live",
-        database_ok=database_ok,
-        integrations=integrations,
+    return IntegrationsHealthOut(
+        mode="demo" if settings.demo_mode else "live", integrations=integrations
     )

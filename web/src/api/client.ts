@@ -3,6 +3,7 @@ import type {
   AuthResponse,
   HealthResponse,
   IntegrationSettings,
+  IntegrationsResponse,
   LibraryCheckItem,
   LibraryCheckResponse,
   MultiSearchResponse,
@@ -175,6 +176,8 @@ export const api = {
   },
   health: {
     get: () => request<HealthResponse>("/api/health"),
+    // Admin-only: per-integration configured/reachable detail.
+    integrations: () => request<IntegrationsResponse>("/api/health/integrations"),
   },
   users: {
     stats: () => request<RequestStatusCounts>("/api/users/me/stats"),

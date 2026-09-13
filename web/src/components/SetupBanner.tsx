@@ -18,8 +18,8 @@ export function SetupBanner() {
   const [dismissed, setDismissed] = useState(() => sessionStorage.getItem(DISMISS_KEY) === "true");
 
   const healthQuery = useQuery({
-    queryKey: ["health"],
-    queryFn: () => api.health.get(),
+    queryKey: ["health-integrations"],
+    queryFn: () => api.health.integrations(),
     staleTime: 60_000,
   });
 

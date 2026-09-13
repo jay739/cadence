@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SetupBanner } from "./SetupBanner";
 import { api } from "../api/client";
-import type { HealthResponse } from "../types/api";
+import type { IntegrationsResponse } from "../types/api";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -13,18 +13,18 @@ vi.mock("../api/client", async () => {
     ...actual,
     api: {
       ...actual.api,
-      health: { get: vi.fn() },
+      health: { get: vi.fn(), integrations: vi.fn() },
     },
   };
 });
 
-const mockedApi = api as unknown as { health: { get: ReturnType<typeof vi.fn> } };
+const mockedApi = api as unknown as {
+  health: { get: ReturnType<typeof vi.fn>; integrations: ReturnType<typeof vi.fn> };
+};
 
-function unconfiguredHealth(): HealthResponse {
+function unconfiguredHealth(): IntegrationsResponse {
   return {
-    version: "0.1.0",
     mode: "live",
-    database_ok: true,
     integrations: {
       prowlarr: { configured: false, reachable: null },
       qbittorrent: { configured: false, reachable: null },
@@ -54,7 +54,7 @@ describe("SetupBanner", () => {
   });
 
   it("shows when nothing is configured", async () => {
-    mockedApi.health.get.mockResolvedValue(unconfiguredHealth());
+    mockedApi.health.integrations.mockResolvedValue(unconfiguredHealth());
     renderBanner();
     expect(await screen.findByRole("status")).toHaveTextContent(/no download sources/i);
   });
@@ -62,7 +62,7 @@ describe("SetupBanner", () => {
   it("stays hidden once at least one integration is configured", async () => {
     const health = unconfiguredHealth();
     health.integrations.prowlarr = { configured: true, reachable: true };
-    mockedApi.health.get.mockResolvedValue(health);
+    mockedApi.health.integrations.mockResolvedValue(health);
     renderBanner();
     // Wait for the query to resolve, then confirm it never rendered.
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -72,14 +72,14 @@ describe("SetupBanner", () => {
   it("stays hidden in demo mode", async () => {
     const health = unconfiguredHealth();
     health.mode = "demo";
-    mockedApi.health.get.mockResolvedValue(health);
+    mockedApi.health.integrations.mockResolvedValue(health);
     renderBanner();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("dismisses for the rest of the session on click", async () => {
-    mockedApi.health.get.mockResolvedValue(unconfiguredHealth());
+    mockedApi.health.integrations.mockResolvedValue(unconfiguredHealth());
     const user = userEvent.setup();
     renderBanner();
     await screen.findByRole("status");
@@ -89,7 +89,7 @@ describe("SetupBanner", () => {
   });
 
   it("links to the admin settings page", async () => {
-    mockedApi.health.get.mockResolvedValue(unconfiguredHealth());
+    mockedApi.health.integrations.mockResolvedValue(unconfiguredHealth());
     renderBanner();
     await screen.findByRole("status");
     expect(screen.getByRole("link", { name: /go to settings/i })).toHaveAttribute(

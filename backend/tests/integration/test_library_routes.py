@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from app.core.config import get_settings
-from tests.integration.conftest import register_and_login
+from tests.integration.conftest import make_admin_headers, register_and_login
 
 pytestmark = pytest.mark.asyncio
 
@@ -238,13 +238,15 @@ class TestHealthReporting:
     async def test_health_reports_the_library_check_as_unconfigured_by_default(
         self, app_client
     ):
-        resp = await app_client.get("/api/health")
+        headers = await make_admin_headers(app_client)
+        resp = await app_client.get("/api/health/integrations", headers=headers)
         assert resp.json()["integrations"]["navidrome_library"]["configured"] is False
 
     async def test_health_reports_configured_once_credentials_are_supplied(
         self, app_client, monkeypatch, httpx_mock
     ):
         _configure_navidrome(monkeypatch)
+        headers = await make_admin_headers(app_client)
         # Health probes Navidrome twice: the anonymous ping for the login backend, then an
         # authenticated one for the service account. One reusable response covers both.
         httpx_mock.add_response(
@@ -252,5 +254,5 @@ class TestHealthReporting:
             json={"subsonic-response": {"status": "ok"}},
             is_reusable=True,
         )
-        resp = await app_client.get("/api/health")
+        resp = await app_client.get("/api/health/integrations", headers=headers)
         assert resp.json()["integrations"]["navidrome_library"]["configured"] is True
