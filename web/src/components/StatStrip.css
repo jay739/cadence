@@ -1,0 +1,52 @@
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.stat-strip__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+}
+
+.stat-strip__value {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-text);
+}
+
+.stat-strip__label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.stat-strip__detail {
+  font-size: 0.78rem;
+  color: var(--color-text-faint);
+}
+
+/* Tones tint the number and the panel edge only. The label and value stay legible on their
+   own, so a tinted tile never depends on colour to be understood. */
+.stat-strip__item--good .stat-strip__value {
+  color: var(--color-status-fulfilled);
+}
+
+.stat-strip__item--warn {
+  border-color: color-mix(in srgb, var(--color-status-awaiting) 55%, transparent);
+}
+
+.stat-strip__item--warn .stat-strip__value {
+  color: var(--color-status-awaiting);
+}
+
+.stat-strip__item--bad .stat-strip__value {
+  color: var(--color-status-failed);
+}

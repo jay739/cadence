@@ -146,7 +146,13 @@ test.describe("Demo mode: request history and fulfillment visibility", () => {
     const fulfilledRow = page.locator(".request-row", { hasText: "Downloaded" }).first();
     if ((await fulfilledRow.count()) > 0) {
       await fulfilledRow.click();
-      await expect(page.getByText("Filed at")).toBeVisible();
+      // Scoped to the detail panel, not getByText("Filed at") on the whole page: a fulfillment
+      // attempt row's own detail text reads "Filed at <path>", so the bare query matches the
+      // metadata label AND the audit entry and trips strict mode. Narrowing beats .first(),
+      // which would also have hidden a genuine duplicate if one ever appeared.
+      await expect(
+        page.locator(".request-detail__meta").getByText("Filed at", { exact: true }),
+      ).toBeVisible();
       await page.goto("/requests");
     }
 
@@ -465,5 +471,26 @@ test.describe("Content Security Policy", () => {
     releaseBundle();
 
     expect(themeBeforeMount).toBe("light");
+  });
+});
+
+test.describe("Home page", () => {
+  test("is reachable at / and linked in the nav", async ({ page }) => {
+    // This is a regression guard, not ceremony: the page shipped as dead code once already.
+    // "/" redirected to /search and no nav link existed, so 200-odd lines of HomePage plus its
+    // stat strip were unreachable while every unit test still passed.
+    await login(page, USER_EMAIL, USER_PASSWORD);
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "What's happening" })).toBeVisible();
+
+    const home = page.getByRole("link", { name: "Home" });
+    await expect(home).toBeVisible();
+
+    // `end` on the NavLink: "/" prefixes every route, so without it Home would stay
+    // highlighted on every page in the app.
+    await page.getByRole("link", { name: "Search" }).click();
+    await expect(page).toHaveURL(/\/search/);
+    await expect(home).not.toHaveClass(/active/);
   });
 });

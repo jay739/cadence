@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes_auth import router as auth_router
 from app.api.routes_health import router as health_router
+from app.api.routes_insights import router as insights_router
 from app.api.routes_library import router as library_router
 from app.api.routes_requests import router as requests_router
 from app.api.routes_search import router as search_router
@@ -153,6 +154,7 @@ def create_app() -> FastAPI:
     app.include_router(library_router)
     app.include_router(requests_router)
     app.include_router(settings_router)
+    app.include_router(insights_router)
     app.include_router(spotify_personalization_router)
     app.include_router(users_router)
 

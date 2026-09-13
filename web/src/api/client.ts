@@ -1,4 +1,5 @@
 import type {
+  AdminInsights,
   ApiErrorBody,
   AuthResponse,
   HealthResponse,
@@ -220,6 +221,12 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ preference }),
       }),
+  },
+  adminInsights: {
+    // Admin-only: aggregates over every user's requests and the fulfillment audit trail, so a
+    // general user gets a 403 here rather than a narrowed view (see routes_insights.py).
+    get: (days = 30) =>
+      request<AdminInsights>(`/api/admin/insights?${new URLSearchParams({ days: String(days) })}`),
   },
   spotifyPersonalization: {
     status: () => request<SpotifyConnectionStatus>("/api/spotify/status"),

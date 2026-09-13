@@ -1,0 +1,138 @@
+/*
+  Home page layout. Everything here sits on the existing tokens and reuses the shared surfaces
+  (.card, .request-row, .status-badge) rather than introducing a second visual language for the
+  landing page -- the point of this page is density of information, not novelty.
+*/
+
+.home-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.home-header h1 {
+  margin-bottom: var(--space-1);
+}
+
+.home-header p {
+  margin: 0;
+}
+
+/* A router <Link>, not a <button>: it needs the inline-block and the text-decoration reset
+   that .button (written for real buttons) does not carry. */
+.home-header__cta {
+  display: inline-block;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+/* The headline numbers come from the shared <StatStrip/> (components/StatStrip.css), which the
+   admin insight page uses too -- see that file for why they are not styled per page. */
+
+/* --- Panels --- */
+
+.home-grid {
+  display: grid;
+  /* minmax(0, ...) rather than a bare fr: without it a long, unbreakable track title forces
+     the column wider than its share and pushes the second panel off the grid. */
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.home-panel {
+  padding: var(--space-5) var(--space-4);
+  min-width: 0;
+}
+
+.home-panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.home-panel__header h2 {
+  margin: 0;
+}
+
+.home-panel__more {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.home-panel__more:hover {
+  color: var(--color-accent);
+}
+
+.home-panel__empty {
+  margin: 0;
+  padding: var(--space-3);
+  font-size: 0.88rem;
+  color: var(--color-text-faint);
+}
+
+.home-panel__footnote {
+  margin: var(--space-2) 0 0;
+  padding: 0 var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--color-text-faint);
+}
+
+.home-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* The rows reuse .request-row's layout, but inside a panel they are not their own glass cards,
+   so the separation has to come from a rule instead of from the gap between surfaces. */
+.home-row + .home-row {
+  border-top: 1px solid var(--color-line-soft);
+}
+
+.home-landed__when {
+  font-size: 0.72rem;
+  color: var(--color-text-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* --- First-run empty state --- */
+
+.home-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.home-empty h2 {
+  margin: 0;
+}
+
+.home-empty p {
+  margin: 0;
+  max-width: 52ch;
+}
+
+.home-empty__cta {
+  display: inline-block;
+  text-decoration: none;
+  margin-top: var(--space-2);
+}
+
+@media (max-width: 900px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

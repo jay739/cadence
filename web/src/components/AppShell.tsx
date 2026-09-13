@@ -17,6 +17,11 @@ export function AppShell() {
           <span className="shell__brand-text">Cadence</span>
         </div>
         <nav className="shell__nav" aria-label="Primary">
+          {/* `end` for the same reason Approval queue below needs it: "/" is a prefix of
+              every route, so without it Home would stay highlighted on every page. */}
+          <NavLink to="/" end className="shell__nav-link">
+            Home
+          </NavLink>
           <NavLink to="/search" className="shell__nav-link">
             Search
           </NavLink>
