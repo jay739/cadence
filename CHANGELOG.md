@@ -38,6 +38,19 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Changed
 
+- One search box instead of two. The separate "paste a Spotify or Apple Music link" input is
+  gone: the main search box now decides for itself, resolving anything that looks like a link
+  to one exact track and searching everything else across the four sources as before. A link is
+  only ever looked up when it is pasted whole or submitted, never as-you-type, since every
+  prefix of a URL is an unrecognized link; a link to an unsupported platform still goes to the
+  resolver, so its specific rejection is what the user reads rather than four sources finding
+  nothing for a URL.
+- The "which source wins" env/database choice has moved out of every integration's permanent
+  layout. It is asked once, during first-run setup, and applies to every integration; afterwards
+  each section keeps its own copy behind a collapsed "Advanced" disclosure whose summary still
+  names the source that integration obeys. An install with `SETTINGS_FORCE_ENV_PRECEDENCE` set
+  opens that disclosure instead of collapsing it, so a stored choice that isn't in effect is
+  never hidden. The endpoint and its semantics are unchanged.
 - A request now asks for a quality (`any` / `lossy` / `lossless`) instead of naming a container
   (`any` / `mp3` / `flac`). Naming a container was a promise Cadence could not keep: a request
   for FLAC was fulfilled with an Opus file, because the format preference only reordered

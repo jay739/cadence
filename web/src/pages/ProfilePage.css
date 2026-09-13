@@ -5,6 +5,29 @@
   max-width: 640px;
 }
 
+/*
+  Panels this size are read and filled in, not aimed at, so they get the quietest treatment in
+  the app: the shadow deepens and, once something inside actually has focus, the edge warms
+  toward the cue light. No lift -- a form panel sliding upward as the pointer crosses it moves
+  every field inside it.
+*/
+.profile-section {
+  transition:
+    border-color var(--motion-hover) var(--ease-out-soft),
+    box-shadow var(--motion-hover) var(--ease-out-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .profile-section:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+}
+
+.profile-section:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  box-shadow: var(--shadow-card-hover);
+}
+
 .profile-section__header {
   margin-bottom: var(--space-4);
 }
@@ -48,6 +71,23 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--color-line);
   background: var(--color-bg-inset);
+  transition:
+    transform var(--motion-hover) var(--ease-out-soft),
+    background-color var(--motion-hover) var(--ease-out-soft);
+}
+
+/*
+  These tiles are readouts, not controls, so the response stops short of anything that would
+  imply a click: the surface comes up off the inset background and the tile rises a single
+  pixel, and that is all. No pointer cursor, and no accent border -- the per-status border
+  colours below already mean something specific, and borrowing the accent for hover would
+  overwrite that meaning on whichever tile the pointer happened to be over.
+*/
+@media (hover: hover) and (pointer: fine) {
+  .stat-tile:hover {
+    transform: translateY(-1px);
+    background: var(--color-bg-raised);
+  }
 }
 
 .stat-tile__value {
