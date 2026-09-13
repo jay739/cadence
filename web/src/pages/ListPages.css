@@ -12,6 +12,27 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
+  transition:
+    transform var(--motion-hover) var(--ease-out-soft),
+    border-color var(--motion-hover) var(--ease-out-soft),
+    box-shadow var(--motion-hover) var(--ease-out-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .request-row:hover {
+    /* The whole row is one navigation target, so it lifts as one object. Two pixels is enough
+       to separate it from the rows either side without the list appearing to ripple as the
+       pointer runs down it. */
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
+    box-shadow: var(--shadow-card-hover);
+  }
+}
+
+/* Outside the hover query on purpose: this is the keyboard equivalent, and tabbing to the row's
+   link has to mark the row on a touch device too, where the block above never matches. */
+.request-row:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
 }
 
 .request-row__link {
@@ -62,6 +83,22 @@
   background: var(--color-bg-inset);
 }
 
+/* The sleeve pushes very slightly into its own frame (the wrapper already clips to the rounded
+   corner), which gives the row a second, quieter cue than the lift alone. */
+.request-row__art img {
+  transition: transform var(--motion-hover) var(--ease-out-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .request-row:hover .request-row__art img {
+    transform: scale(1.06);
+  }
+
+  .request-row__link:hover .request-row__title {
+    color: var(--color-accent-strong);
+  }
+}
+
 .request-row__body {
   flex: 1;
   min-width: 0;
@@ -72,6 +109,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color var(--motion-hover) var(--ease-out-soft);
 }
 
 .request-row__artist {

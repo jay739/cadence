@@ -54,7 +54,23 @@
   --space-8: 64px;
 
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.07) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
+  /* The lifted counterpart of --shadow-card: the same inset highlight a shade brighter, the
+     same cast shadow thrown a little further. A token rather than a value hand-rolled per
+     surface, so every panel that responds to the pointer lifts by exactly the same amount,
+     and so the light palette can restate it below -- a near-black cast that reads as depth
+     over the dark console turns into a grey smear over paper. */
+  --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 14px 32px rgba(0, 0, 0, 0.45);
   --focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent-strong);
+
+  /* Motion. One duration and one curve shared by every hover and focus affordance in the app,
+     so a request row, a button and a stat tile all settle at the same rate instead of each
+     stylesheet inventing its own. Deliberately short: this interface is meant to stay out of
+     the way, and much past a quarter-second a hover stops reading as feedback and starts
+     reading as an effect. The curve decelerates without overshooting, so nothing springs or
+     bounces. Everything built on these goes through `transition`, which is what lets the
+     prefers-reduced-motion block at the foot of this file flatten all of it in one place. */
+  --motion-hover: 180ms;
+  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
 
   /* Glass surfaces. --glass-bg is deliberately translucent so the ambient wash painted on
      body::before shows through: on a perfectly flat background, backdrop-filter has nothing
@@ -89,6 +105,9 @@
     --color-accent-ink: #fff8ea;
 
     --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 20px rgba(60, 45, 10, 0.12);
+    /* Warm brown rather than the dark palette's black: a neutral shadow over this paper
+       background greys the panel's surroundings instead of lifting it off them. */
+    --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 14px 28px rgba(60, 45, 10, 0.2);
 
     /* Light mode needs a higher opacity and a white-ish edge: the same alpha that reads as
        frosted over a near-black console reads as washed-out and low-contrast over paper. */
@@ -112,6 +131,7 @@
   --color-accent-ink: #fff8ea;
 
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 20px rgba(60, 45, 10, 0.12);
+  --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 14px 28px rgba(60, 45, 10, 0.2);
 
   /* Must be repeated here, not only in the media query above: toggling to light while the OS
      is in dark mode matches this block but not that one, and inheriting the dark glass values

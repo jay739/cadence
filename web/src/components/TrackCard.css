@@ -2,9 +2,38 @@
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  padding: var(--space-3) 0;
+  /*
+    The inline padding and the negative margin that cancels it exist only so the hover tint has
+    something to paint at the row's edges: without them the highlight would stop dead on the
+    first and last pixel of content. Equal and opposite, so every piece of content stays on
+    exactly the line it sat on before.
+  */
+  padding: var(--space-3) var(--space-2);
+  margin: 0 calc(var(--space-2) * -1);
+  border-radius: var(--radius-sm);
   border-bottom: 1px solid var(--color-line-soft);
   list-style: none;
+  transition: background-color var(--motion-hover) var(--ease-out-soft);
+}
+
+/*
+  A tint rather than the lift used on request rows. These are search results: the row itself
+  goes nowhere, only the button at its end does, so the highlight is there to tie a long row of
+  metadata to the button the user is aiming at, not to suggest the row can be clicked.
+*/
+@media (hover: hover) and (pointer: fine) {
+  .track-card:hover {
+    background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  }
+
+  .track-card:hover .track-card__art img,
+  .track-card:hover .track-card__art-fallback {
+    transform: scale(1.06);
+  }
+}
+
+.track-card:focus-within {
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
 }
 
 .track-card:last-child {
@@ -25,6 +54,7 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: transform var(--motion-hover) var(--ease-out-soft);
 }
 
 .track-card__art-fallback {
@@ -38,6 +68,7 @@
     var(--color-line-soft) 6px,
     var(--color-line-soft) 12px
   );
+  transition: transform var(--motion-hover) var(--ease-out-soft);
 }
 
 .track-card__body {
@@ -107,6 +138,17 @@
   border: 1px solid var(--color-line);
   background: var(--color-bg-inset);
   color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    border-color var(--motion-hover) var(--ease-out-soft),
+    color var(--motion-hover) var(--ease-out-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .track-card__format:hover:not(:disabled) {
+    border-color: var(--color-text-faint);
+    color: var(--color-text);
+  }
 }
 
 /* Appended at the end of the file on purpose: the library badge is an additive feature and

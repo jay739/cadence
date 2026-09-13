@@ -12,6 +12,27 @@
   align-items: center;
   gap: var(--space-4);
   flex-wrap: wrap;
+  transition:
+    border-color var(--motion-hover) var(--ease-out-soft),
+    box-shadow var(--motion-hover) var(--ease-out-soft);
+}
+
+/*
+  Warms and deepens but pointedly does not lift, unlike the request rows in ListPages.css. A
+  queue row carries a note field the admin types into, and nudging the card upward as the
+  pointer crosses it would shift the text cursor's own line while it is in use. The border and
+  shadow carry the same "this is the row you are on" message without moving anything.
+*/
+@media (hover: hover) and (pointer: fine) {
+  .queue-row:hover {
+    border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
+    box-shadow: var(--shadow-card-hover);
+  }
+}
+
+.queue-row:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .queue-row__info {
@@ -23,6 +44,7 @@
   font-weight: 600;
   color: var(--color-text);
   text-decoration: none;
+  transition: color var(--motion-hover) var(--ease-out-soft);
 }
 
 .queue-row__title:hover {
@@ -48,6 +70,19 @@
   background: var(--color-bg-inset);
   color: var(--color-text);
   width: 220px;
+  transition: border-color var(--motion-hover) var(--ease-out-soft);
+}
+
+/* Matches .field input in base.css, including skipping the focused state so hovering an input
+   already being typed into doesn't drag its border off the accent. */
+@media (hover: hover) and (pointer: fine) {
+  .queue-row__note:hover:not(:focus) {
+    border-color: var(--color-text-faint);
+  }
+}
+
+.queue-row__note:focus-visible {
+  border-color: var(--color-accent);
 }
 
 .queue-row__actions {

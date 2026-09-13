@@ -80,12 +80,26 @@ p {
   border: 1px solid transparent;
   cursor: pointer;
   transition:
-    transform 0.1s ease,
-    background 0.15s ease,
-    border-color 0.15s ease;
+    transform var(--motion-hover) var(--ease-out-soft),
+    background var(--motion-hover) var(--ease-out-soft),
+    border-color var(--motion-hover) var(--ease-out-soft),
+    color var(--motion-hover) var(--ease-out-soft),
+    box-shadow var(--motion-hover) var(--ease-out-soft);
 }
 
-.button:active {
+/* The lift lives on the shared .button rule rather than on each variant below, for a
+   specificity reason rather than a tidiness one: a `transform` on `.button--primary:hover`
+   would outweigh the press rule that follows and the button would stop dipping when clicked. */
+@media (hover: hover) and (pointer: fine) {
+  .button:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+}
+
+/* Has to stay after the hover rule and carry the same specificity: a pressed button is almost
+   always hovered too, so source order is the only thing deciding which of the two transforms
+   applies. That is also why this is `:active:not(:disabled)` and not a bare `:active`. */
+.button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
@@ -101,6 +115,9 @@ p {
 
 .button--primary:hover:not(:disabled) {
   background: var(--color-accent-strong);
+  /* The cue light catching on the surface under the button, not a generic drop shadow: it is
+     mixed from the accent itself so it stays amber in both palettes. */
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-accent) 32%, transparent);
 }
 
 .button--ghost {
@@ -112,6 +129,7 @@ p {
 .button--ghost:hover:not(:disabled) {
   color: var(--color-text);
   border-color: var(--color-text-faint);
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 
 .button--danger {
@@ -122,6 +140,7 @@ p {
 
 .button--danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-status-failed) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-failed) 70%, transparent);
 }
 
 .field {
@@ -144,6 +163,17 @@ p {
   border: 1px solid var(--color-line);
   background: var(--color-bg-inset);
   color: var(--color-text);
+  transition:
+    border-color var(--motion-hover) var(--ease-out-soft),
+    background-color var(--motion-hover) var(--ease-out-soft);
+}
+
+/* Excluded while focused so the pointer passing over an input the user is already typing in
+   doesn't pull its border back off the accent colour. */
+@media (hover: hover) and (pointer: fine) {
+  .field input:hover:not(:disabled):not(:focus) {
+    border-color: var(--color-text-faint);
+  }
 }
 
 .field input:focus-visible {
