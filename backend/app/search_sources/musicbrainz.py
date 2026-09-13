@@ -18,6 +18,7 @@ from app.schemas.search import TrackResult
 from app.search_sources.base import SearchSource
 
 MUSICBRAINZ_SEARCH_URL = "https://musicbrainz.org/ws/2/recording"
+MUSICBRAINZ_RELEASE_URL = "https://musicbrainz.org/ws/2/release"
 USER_AGENT = "Cadence/0.1.0 (self-hosted single-track music request service)"
 
 # MBIDs are always UUIDs. Enforced again here, independent of Pydantic-level validation
@@ -103,7 +104,15 @@ class MusicBrainzSearchSource(SearchSource):
 async def lookup_recording(
     recording_id: str, client: SafeHttpClient | None = None
 ) -> dict | None:
-    """Fetch canonical tag data for a single recording, used by the tagging step."""
+    """Fetch canonical tag data for a single recording, used by the tagging step.
+
+    `genres` is requested alongside artist-credits and releases because it is the only place a
+    genre is reachable in one call. It is frequently an empty list (MusicBrainz genres are
+    user-voted and sparse, especially for the regional catalogue this tier exists to serve),
+    which the tagging step treats as "no genre" rather than substituting a guess.
+    Release country and language are NOT in this response at any `inc` level; they require a
+    separate release lookup, which is what `lookup_release` below is for.
+    """
     if not _MBID_RE.match(recording_id):
         return None
     http = client or SafeHttpClient()
@@ -111,7 +120,31 @@ async def lookup_recording(
     resp = await http.get(
         f"{MUSICBRAINZ_SEARCH_URL}/{recording_id}",
         policy=POLICY_PUBLIC_ONLY,
-        params={"fmt": "json", "inc": "artist-credits+releases"},
+        params={"fmt": "json", "inc": "artist-credits+releases+genres"},
+        headers={"User-Agent": USER_AGENT},
+    )
+    if resp.status_code != 200:
+        return None
+    return resp.json()
+
+
+async def lookup_release(
+    release_id: str, client: SafeHttpClient | None = None
+) -> dict | None:
+    """Fetch a single release, the only source of country and language for the tagging step.
+
+    Kept separate from `lookup_recording` (rather than folded into it) because it is a second
+    rate-limited round trip against MusicBrainz, only worth making once a recording lookup has
+    actually produced a release MBID to ask about.
+    """
+    if not _MBID_RE.match(release_id):
+        return None
+    http = client or SafeHttpClient()
+    await _rate_limiter.wait()
+    resp = await http.get(
+        f"{MUSICBRAINZ_RELEASE_URL}/{release_id}",
+        policy=POLICY_PUBLIC_ONLY,
+        params={"fmt": "json", "inc": "genres"},
         headers={"User-Agent": USER_AGENT},
     )
     if resp.status_code != 200:
