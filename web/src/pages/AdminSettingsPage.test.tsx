@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -57,6 +57,37 @@ function baseSettings(): IntegrationSettings {
       library: { preference: "env", forced_env: false },
     },
   };
+}
+
+/**
+ * An install that is past first run: one integration actually configured, which is what makes
+ * the setup-time precedence card stand down and leaves only the per-section disclosures.
+ */
+function configuredSettings(): IntegrationSettings {
+  const settings = baseSettings();
+  settings.prowlarr.prowlarr_url = {
+    value: "http://prowlarr:9696",
+    source: "db",
+    is_secret: false,
+  };
+  return settings;
+}
+
+/** The one integration's card, so a query can't wander into another section's identical control. */
+function sectionFor(title: string): HTMLElement {
+  // A string `name` is matched against the whole accessible name, so this can't stray into a
+  // section that merely mentions another integration in its description.
+  const heading = screen.getByRole("heading", { name: title });
+  const section = heading.closest("section");
+  if (!section) throw new Error(`No settings section found for ${title}`);
+  return section as HTMLElement;
+}
+
+/** That section's collapsed "Advanced" disclosure, where the source choice now lives. */
+function advancedFor(title: string): HTMLElement {
+  const details = sectionFor(title).querySelector("details.settings-advanced");
+  if (!details) throw new Error(`No Advanced disclosure found for ${title}`);
+  return details as HTMLElement;
 }
 
 function renderWithQueryClient() {
@@ -174,8 +205,24 @@ describe("AdminSettingsPage", () => {
     expect(testButtons).toHaveLength(4);
   });
 
-  it("choosing 'Use these settings' saves the source preference for that integration", async () => {
-    const settings = baseSettings();
+  it("keeps the source choice out of the always-visible layout, behind each section's Advanced", async () => {
+    const settings = configuredSettings();
+    vi.mocked(api.adminSettings.get).mockResolvedValue(settings);
+
+    renderWithQueryClient();
+    await screen.findByText("Prowlarr");
+
+    // Five sections no longer spend five radio pairs' worth of vertical space on a question an
+    // operator answers about once.
+    for (const title of ["Prowlarr", "qBittorrent", "slskd (Soulseek)", "Spotify", "Library"]) {
+      expect(advancedFor(title)).not.toHaveAttribute("open");
+    }
+    // Collapsed, but not opaque: what each install is actually obeying reads off the summary.
+    expect(within(advancedFor("Prowlarr")).getByText("environment wins")).toBeInTheDocument();
+  });
+
+  it("choosing 'Use these settings' under Advanced saves that one integration's preference", async () => {
+    const settings = configuredSettings();
     vi.mocked(api.adminSettings.get).mockResolvedValue(settings);
     vi.mocked(api.adminSettings.updateSourcePreference).mockResolvedValue(settings);
     const user = userEvent.setup();
@@ -183,24 +230,84 @@ describe("AdminSettingsPage", () => {
     renderWithQueryClient();
     await screen.findByText("Prowlarr");
 
-    const databaseRadios = screen.getAllByRole("radio", { name: "Use these settings" });
-    await user.click(databaseRadios[0]);
+    const advanced = advancedFor("Prowlarr");
+    await user.click(within(advanced).getByText("Advanced"));
+    await user.click(within(advanced).getByRole("radio", { name: "Use these settings" }));
 
     await waitFor(() => {
       expect(api.adminSettings.updateSourcePreference).toHaveBeenCalledWith("prowlarr", "database");
     });
+    // Strictly that one integration: the per-section control is still per-section.
+    expect(api.adminSettings.updateSourcePreference).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the break-glass override note and reflects the stored preference despite it", async () => {
-    const settings = baseSettings();
+  it("never collapses the break-glass override out of sight", async () => {
+    const settings = configuredSettings();
     settings.source_preferences.prowlarr = { preference: "database", forced_env: true };
     vi.mocked(api.adminSettings.get).mockResolvedValue(settings);
 
     renderWithQueryClient();
     await screen.findByText("Prowlarr");
 
-    expect(screen.getByText(/SETTINGS_FORCE_ENV_PRECEDENCE is set/)).toBeInTheDocument();
-    const databaseRadios = screen.getAllByRole("radio", { name: "Use these settings" });
-    expect(databaseRadios[0]).toBeChecked();
+    // Showing a selected radio the app isn't obeying is worse than the clutter this disclosure
+    // removes, so a forced install opens the panel instead of hiding the reason why.
+    const advanced = advancedFor("Prowlarr");
+    expect(advanced).toHaveAttribute("open");
+    expect(within(advanced).getByText(/SETTINGS_FORCE_ENV_PRECEDENCE is set/)).toBeInTheDocument();
+    expect(within(advanced).getByText("environment (forced)")).toBeInTheDocument();
+    // …and the stored choice is still reported honestly, not rewritten to match what's forced.
+    expect(within(advanced).getByRole("radio", { name: "Use these settings" })).toBeChecked();
+  });
+});
+
+describe("AdminSettingsPage first-run source precedence", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("asks the question once during setup, and answers it for every integration", async () => {
+    const settings = baseSettings();
+    vi.mocked(api.adminSettings.get).mockResolvedValue(settings);
+    vi.mocked(api.adminSettings.updateSourcePreference).mockResolvedValue(settings);
+    const user = userEvent.setup();
+
+    renderWithQueryClient();
+    const card = (await screen.findByText(/where should these settings come from/i)).closest(
+      "section",
+    ) as HTMLElement;
+
+    await user.click(within(card).getByRole("radio", { name: "Use these settings" }));
+
+    await waitFor(() => {
+      expect(api.adminSettings.updateSourcePreference).toHaveBeenCalledTimes(5);
+    });
+    for (const key of ["prowlarr", "qbittorrent", "slskd", "spotify", "library"]) {
+      expect(api.adminSettings.updateSourcePreference).toHaveBeenCalledWith(key, "database");
+    }
+  });
+
+  it("says so when integrations disagree rather than showing one of them as selected", async () => {
+    const settings = baseSettings();
+    settings.source_preferences.spotify = { preference: "database", forced_env: false };
+    vi.mocked(api.adminSettings.get).mockResolvedValue(settings);
+
+    renderWithQueryClient();
+    const card = (await screen.findByText(/where should these settings come from/i)).closest(
+      "section",
+    ) as HTMLElement;
+
+    expect(within(card).getByText(/currently disagree/i)).toBeInTheDocument();
+    expect(within(card).getByRole("radio", { name: "Use environment" })).not.toBeChecked();
+    expect(within(card).getByRole("radio", { name: "Use these settings" })).not.toBeChecked();
+  });
+
+  it("disappears once anything is configured, leaving only the per-section Advanced", async () => {
+    vi.mocked(api.adminSettings.get).mockResolvedValue(configuredSettings());
+
+    renderWithQueryClient();
+    await screen.findByText("Prowlarr");
+
+    expect(screen.queryByText(/where should these settings come from/i)).not.toBeInTheDocument();
+    expect(advancedFor("Prowlarr")).toBeInTheDocument();
   });
 });

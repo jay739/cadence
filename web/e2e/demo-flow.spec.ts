@@ -50,6 +50,33 @@ test.describe("Demo mode: search", () => {
       await expect(panel).not.toBeEmpty();
     }
   });
+
+  test("the same box resolves a pasted track link instead of searching for it", async ({
+    page,
+    context,
+  }) => {
+    // One box, two behaviours. Exercised as a real clipboard paste rather than a fill(), since
+    // "resolve when the whole link lands at once, never mid-typing" is the behaviour that makes
+    // merging the two inputs safe, and only a genuine paste event proves it.
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await login(page, USER_EMAIL, USER_PASSWORD);
+
+    const searchBox = page.getByRole("searchbox");
+    await searchBox.click();
+    await page.evaluate(() =>
+      navigator.clipboard.writeText("https://open.spotify.com/track/6y0igZArWVi6Iz0rj35c1Y"),
+    );
+    await page.keyboard.press("ControlOrMeta+V");
+
+    // No Search/Resolve click: the paste settles into a lookup on its own, and what comes back
+    // is one exact track rather than the four per-source tabs.
+    await expect(page.getByRole("button", { name: "Request" })).toHaveCount(1);
+    await expect(page.getByRole("tablist")).toHaveCount(0);
+
+    // Clearing the link hands the same box back to the streaming search, tabs and all.
+    await searchBox.fill("Tum Hi Ho");
+    await expect(page.getByRole("tablist")).toBeVisible();
+  });
 });
 
 test.describe("Demo mode: request lifecycle", () => {
@@ -290,21 +317,37 @@ test.describe("Admin integration settings", () => {
     await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
     await page.goto("/admin/settings");
 
-    const prowlarrSection = page
+    // The choice now lives in each section's Advanced disclosure rather than permanently above
+    // its fields, so the page stops spending five radio pairs of vertical space on a question
+    // an operator answers about once.
+    const advanced = page
       .locator(".settings-section")
-      .filter({ has: page.getByRole("heading", { name: "Prowlarr", exact: true }) });
-    const useDatabase = prowlarrSection.getByRole("radio", { name: "Use these settings" });
+      .filter({ has: page.getByRole("heading", { name: "Prowlarr", exact: true }) })
+      .locator("details.settings-advanced");
+    const useDatabase = advanced.getByRole("radio", { name: "Use these settings" });
+    await expect(useDatabase).toBeHidden();
+    // Collapsed is not opaque: the summary still says which source this integration obeys.
+    // Matched loosely because a retried run starts from whichever choice the first attempt left.
+    await expect(advanced.locator("summary")).toContainText(/environment wins|these settings win/);
+
+    await advanced.locator("summary").click();
     await expect(useDatabase).toBeVisible();
     await useDatabase.click();
     await expect(useDatabase).toBeChecked();
+    // The refetch a successful save triggers must not slam the panel shut under the admin.
+    await expect(useDatabase).toBeVisible();
+    await expect(advanced.locator("summary")).toContainText("these settings win");
 
     // Survives a reload: the choice round-tripped through the backend, not just local state.
     await page.reload();
-    const prowlarrSectionAfterReload = page
+    const advancedAfterReload = page
       .locator(".settings-section")
-      .filter({ has: page.getByRole("heading", { name: "Prowlarr", exact: true }) });
+      .filter({ has: page.getByRole("heading", { name: "Prowlarr", exact: true }) })
+      .locator("details.settings-advanced");
+    await expect(advancedAfterReload.locator("summary")).toContainText("these settings win");
+    await advancedAfterReload.locator("summary").click();
     await expect(
-      prowlarrSectionAfterReload.getByRole("radio", { name: "Use these settings" }),
+      advancedAfterReload.getByRole("radio", { name: "Use these settings" }),
     ).toBeChecked();
   });
 });
