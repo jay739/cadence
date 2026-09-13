@@ -117,10 +117,55 @@ def _query_for(request_row: Request) -> str:
     return " ".join(p for p in parts if p)
 
 
+async def _set_progress(
+    session: AsyncSession,
+    request_row: Request,
+    *,
+    percent: float | None,
+    phase: str | None,
+) -> None:
+    """Record what the in-flight download is doing, for the request detail/list views to read.
+
+    Committed immediately because the API serves these fields from a different session than
+    the worker that observes them: an uncommitted value is invisible to the very poll it
+    exists to answer.
+
+    `percent` is None whenever no honest number is available, and that is passed straight
+    through rather than coerced to 0.0. Only qBittorrent and slskd expose a real fraction; the
+    ytdlp-shim tier has nothing but a job state, so it moves through here with a phase and a
+    NULL percentage instead of a fabricated one.
+    """
+    request_row.download_progress_percent = percent
+    request_row.download_phase = phase
+    await session.commit()
+
+
+async def _clear_progress(session: AsyncSession, request_row: Request) -> None:
+    """Drop any in-flight progress, for a request that is no longer downloading.
+
+    Called when a tier gives up on a candidate as well as when one succeeds: a stale "87%,
+    receiving from peer" left on a request that has since moved on describes a transfer that
+    is not running any more, which is a subtler version of the same lie as a fake bar.
+    """
+    await _set_progress(session, request_row, percent=None, phase=None)
+
+
 async def _poll_until_settled(
-    check: Callable[[], Awaitable[bool]], settings: Settings
+    check: Callable[[], Awaitable[bool]],
+    settings: Settings,
+    *,
+    on_tick: Callable[[], Awaitable[None]] | None = None,
 ) -> bool:
     """Poll `check` on a bounded interval until it returns True or the timeout elapses.
+
+    `on_tick`, when given, runs after each unsuccessful check and is where a tier reports how
+    far along its transfer is. It is deliberately the caller's own closure rather than a
+    percentage this function computes: only the tier knows whether its backend can answer that
+    question at all, and this loop must not invent a number for the one that cannot.
+
+    A failing `on_tick` must never abort a download that is otherwise progressing, so it is
+    called defensively: progress reporting is a display concern, and losing it is worth far
+    less than the transfer it describes.
 
     Shared by the slskd and ytdlp-shim tiers, both of which start a real, non-instant transfer
     and then need to wait on it. `FULFILLMENT_POLL_INTERVAL_SECONDS` and
@@ -140,6 +185,13 @@ async def _poll_until_settled(
     while asyncio.get_event_loop().time() < deadline:
         if await check():
             return True
+        if on_tick is not None:
+            try:
+                await on_tick()
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - progress display never fails a download
+                logger.warning("progress_report_failed", error=str(exc))
         await asyncio.sleep(settings.fulfillment_poll_interval_seconds)
     return False
 
@@ -476,7 +528,26 @@ async def _try_prowlarr(
         async def _check(torrent_hash: str = torrent_hash) -> bool:
             return await qbt.is_complete(torrent_hash)
 
-        completed = await _poll_until_settled(_check, settings)
+        # The one tier with a genuine fraction to report: qBittorrent's `progress` is a 0..1
+        # float on the same payload the completion check already reads.
+        async def _report(torrent_hash: str = torrent_hash) -> None:
+            percent = await qbt.progress_percent(torrent_hash)
+            await _set_progress(
+                session,
+                request_row,
+                percent=percent,
+                phase="Downloading from the torrent swarm",
+            )
+
+        await _set_progress(
+            session,
+            request_row,
+            percent=None,
+            phase="Waiting for the torrent to start",
+        )
+        completed = await _poll_until_settled(_check, settings, on_tick=_report)
+        if not completed:
+            await _clear_progress(session, request_row)
         if not completed:
             await _log_attempt(
                 session,
@@ -695,7 +766,29 @@ async def _try_slskd(
         ) -> bool:
             return await slskd.is_download_complete(username, identifier)
 
-        completed = await _poll_until_settled(_check, settings)
+        # Verified against a live slskd rather than assumed: the per-file transfer object this
+        # tier already polls for completion also carries `percentComplete` and the byte counts
+        # behind it, so this is a real measurement, not an estimate.
+        async def _report(
+            username: str = confirmed_username, identifier: str = candidate_identifier
+        ) -> None:
+            percent = await slskd.download_progress(username, identifier)
+            await _set_progress(
+                session,
+                request_row,
+                percent=percent,
+                phase="Receiving from a Soulseek peer",
+            )
+
+        await _set_progress(
+            session,
+            request_row,
+            percent=None,
+            phase="Waiting for a Soulseek peer",
+        )
+        completed = await _poll_until_settled(_check, settings, on_tick=_report)
+        if not completed:
+            await _clear_progress(session, request_row)
         if not completed:
             await _log_attempt(
                 session,
@@ -910,7 +1003,26 @@ async def _try_ytdlp(
             last_status.append(status)
             return status[0] not in ("running", "unknown")
 
-        settled = await _poll_until_settled(_check, settings)
+        # No percentage here, ever. The shim reports a job state and nothing else (see
+        # ytdlp-shim/app/main.py: yt-dlp is run to completion as a subprocess, with no byte
+        # counts surfaced), so this tier says what it is doing and leaves the number NULL
+        # rather than showing a bar that would only be tracking the clock.
+        async def _report(last_status: list = last_status) -> None:
+            state = last_status[-1][0] if last_status else "unknown"
+            phase = (
+                "Fetching the audio from YouTube"
+                if state == "running"
+                else "Waiting for YouTube"
+            )
+            await _set_progress(session, request_row, percent=None, phase=phase)
+
+        await _set_progress(
+            session,
+            request_row,
+            percent=None,
+            phase="Fetching the audio from YouTube",
+        )
+        settled = await _poll_until_settled(_check, settings, on_tick=_report)
         state, filename, error = (
             last_status[-1] if last_status else ("unknown", None, None)
         )
@@ -933,6 +1045,7 @@ async def _try_ytdlp(
                 outcome=FulfillmentOutcome.DOWNLOAD_FAILED,
                 detail=error or f"ytdlp-shim job ended in state {state!r}",
             )
+            await _clear_progress(session, request_row)
             continue
 
         source_file = staging_dir / filename

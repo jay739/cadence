@@ -6,10 +6,34 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.request import Request, RequestStatus
+from app.models.request import FulfillmentOutcome, Request, RequestStatus
 from app.models.user import User
 from app.schemas.request import ApproveRequestIn, CreateRequestIn, RejectRequestIn
 from app.services.webhook_delivery import notify_webhook
+
+
+def delivered_by_backend(request_row: Request) -> str | None:
+    """Which fulfillment tier actually delivered this track, or None if none has yet.
+
+    Derived from the attempts audit trail rather than stored on the request: every pass
+    already writes a DOWNLOAD_COMPLETED row naming the backend that finished the job, so a
+    dedicated column would be a second source of truth for a fact the rows already carry.
+
+    The *last* such row wins, not the first. A request that Prowlarr failed and Soulseek later
+    rescued (or one retried after a failure, which appends to the same trail) must name the
+    tier the file actually came from; reading the first completion would credit a tier whose
+    result was superseded.
+
+    Requires `attempts` to be loaded -- callers reach this through routes that eager-load it.
+    """
+    delivered = [
+        attempt
+        for attempt in request_row.attempts
+        if attempt.outcome == FulfillmentOutcome.DOWNLOAD_COMPLETED.value
+    ]
+    if not delivered:
+        return None
+    return delivered[-1].backend
 
 
 def compute_dedupe_key(source: str, source_id: str) -> str:
@@ -100,10 +124,19 @@ async def create_or_get_existing_request(
 
 
 async def list_requests_for_user(session: AsyncSession, user_id: str) -> list[Request]:
+    """A user's own requests, newest first, with the attempts audit trail eager-loaded.
+
+    The eager load is what lets each row report which tier actually delivered it (see
+    `delivered_by`). Without it, serializing that field on this route would touch a lazy
+    relationship outside the session's greenlet context and raise MissingGreenlet, exactly as
+    documented on `get_request_by_id_with_attempts` -- and the requests list is precisely where
+    a "from Soulseek" badge needs to appear, so the two cannot be separated.
+    """
     result = await session.execute(
         select(Request)
         .where(Request.user_id == user_id)
         .order_by(Request.created_at.desc())
+        .options(selectinload(Request.attempts))
     )
     return list(result.scalars().all())
 

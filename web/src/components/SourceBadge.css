@@ -1,0 +1,16 @@
+/* Quieter than StatusBadge on purpose: where a track came from is context, not the headline.
+   It sits next to a "Downloaded" badge and must not compete with it, so it borrows the
+   fulfilled colour at low strength rather than claiming a colour of its own. */
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-status-fulfilled) 28%, transparent);
+  background: color-mix(in srgb, var(--color-status-fulfilled) 8%, transparent);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}

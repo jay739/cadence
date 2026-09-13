@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -109,6 +110,28 @@ class Request(Base):
     admin_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     final_file_path: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
+    # Live progress of the download currently in flight, written by the fulfillment worker on
+    # each poll tick and read back by the API in a *different* session, which is why this is
+    # persisted rather than held in worker memory: the two never share a process boundary.
+    #
+    # NULL is load-bearing and means "no honest number exists", never "0% done". Only two of
+    # the three tiers can report a real fraction (qBittorrent's `progress`, slskd's
+    # `percentComplete`); the YouTube tier exposes nothing but a job state, so its downloads
+    # run with this NULL and the phase text below carrying the whole story. Nothing in the UI
+    # may invent a bar from a timer to fill the gap.
+    #
+    # Staleness needs no special handling: a worker that dies mid-download leaves a row in
+    # DOWNLOADING, and FulfillmentWorker.recover_crashed_jobs resets those to APPROVED (which
+    # clears both fields) before anything is polled again.
+    download_progress_percent: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )
+
+    # What is happening right now, in the requester's language ("Waiting for peers",
+    # "Extracting audio"). The only thing the YouTube tier can honestly show, and useful
+    # alongside a percentage on the tiers that do report one.
+    download_phase: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     # Bookkeeping for idempotency and worker crash-recovery.
     dedupe_key: Mapped[str] = mapped_column(String(600), index=True, nullable=False)

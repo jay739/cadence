@@ -1,6 +1,8 @@
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
+import { DownloadProgress } from "../components/DownloadProgress";
+import { SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import type { DesiredQuality } from "../types/api";
 import "./RequestDetailPage.css";
@@ -63,6 +65,15 @@ export function RequestDetailPage() {
           </div>
           <div className="request-detail__status">
             <StatusBadge status={data.status} />
+            {data.status === "fulfilled" && data.delivered_by && (
+              <SourceBadge backend={data.delivered_by} />
+            )}
+            {data.status === "downloading" && (
+              <DownloadProgress
+                percent={data.download_progress_percent}
+                phase={data.download_phase}
+              />
+            )}
             {data.status === "failed" && (
               <button
                 type="button"

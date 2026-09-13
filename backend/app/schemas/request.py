@@ -100,6 +100,23 @@ class RequestOut(BaseModel):
     failure_reason: str | None
     final_file_path: str | None
     fulfillment_attempts_count: int
+
+    # Which tier actually delivered the file ("prowlarr" | "slskd" | "ytdlp"), or None while
+    # nothing has been delivered yet. Derived from the attempts audit trail, never stored (see
+    # app.services.requests.delivered_by_backend), and deliberately the raw backend key rather
+    # than a display string: the client owns the requester-facing wording, the same way it does
+    # for request statuses.
+    delivered_by: str | None = None
+
+    # How far along the in-flight download is, 0..100, or None when no honest number exists.
+    # None is not 0: the ytdlp-shim tier reports no fraction at all, so its downloads carry a
+    # phase and no percentage rather than a bar invented to fill the space.
+    download_progress_percent: float | None = None
+
+    # What is happening right now, in the requester's own language. The whole story for the
+    # tier that cannot report a number, and useful context next to the ones that can.
+    download_phase: str | None = None
+
     created_at: datetime
     updated_at: datetime
 

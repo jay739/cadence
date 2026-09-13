@@ -190,6 +190,12 @@ class _RequestSeed(TypedDict, total=False):
     admin_note: str
     failure_reason: str
     desired_quality: str
+    # Live download progress, for the one seeded request that is mid-flight. Only the torrent
+    # and Soulseek tiers can report a real percentage (the YouTube tier exposes none at all),
+    # so a seed may carry a phase with or without a number -- which is exactly the pair of
+    # cases the requests list has to render honestly.
+    download_progress_percent: float
+    download_phase: str
     # How far back to date this request, instead of stamping the whole seeded queue with the
     # moment the demo container happened to boot. Without it every demo request shares one
     # timestamp, which makes the admin insight page's request-volume series a single spike
@@ -225,6 +231,11 @@ DEMO_REQUEST_SEEDS: list[_RequestSeed] = [
         "source_id": "demo-spotify-0",
         "status": RequestStatus.DOWNLOADING,
         "created_days_ago": 1,
+        # Seeded mid-transfer with a real number, because this is the tier that can measure
+        # itself: the demo is showing what a torrent download genuinely reports, not a
+        # placeholder bar.
+        "download_progress_percent": 63.0,
+        "download_phase": "Downloading from the torrent swarm",
     },
     {
         "title": "Butta Bomma",
