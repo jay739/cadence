@@ -35,6 +35,15 @@ All notable changes to this project are documented here. Format loosely follows
 - Profile avatars for everyone: an explicit `avatar_url` still wins, and any account without one
   now gets a deterministic doodle generated server-side as an inline SVG. No new dependency and
   no external avatar service, so it works on an install with no internet access.
+- Richer tags on every filed track, and tags at all on the ones that had none. Tagging now
+  handles Opus and MP4/M4A alongside MP3 and FLAC: Opus is what the YouTube tier lands, so the
+  regional catalogue that only that tier can find was arriving in the library completely
+  untagged. Beyond title/artist/album, a track now carries the release year, every credited
+  artist (so featured performers survive), the album/soundtrack it came from, genre, release
+  country and language, plus embedded front-cover artwork fetched from the Cover Art Archive
+  and capped at 2MB. Year, credits, genre, country and language come from MusicBrainz, so they
+  are written only for a request that carried a recording MBID, and any field MusicBrainz does
+  not know is left unwritten rather than guessed.
 
 ### Changed
 
