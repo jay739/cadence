@@ -74,5 +74,3 @@ First tagged release. The release workflow publishes `ghcr.io/jay739/cadence:0.1
   request that finds only lossy copies ends in a new `awaiting_quality` status that asks the
   requester whether to accept one rather than silently downgrading or failing. Existing rows are
   migrated (`flac` to `lossless`, `mp3` to `lossy`).
-
-No tagged release yet; `v0.1.0` will be cut once the pipeline is proven end to end.
