@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-24
+
+First tagged release. The release workflow publishes `ghcr.io/jay739/cadence:0.1.0` and
+`ghcr.io/jay739/cadence-ytdlp-shim:0.1.0` (amd64 and arm64), replacing the hand-built
+`cadence:local` and `ytdlp-shim:local` images.
+
 ### Added
 
 - Phase 1: FastAPI backend with multi-source search (Apple/iTunes, MusicBrainz, Spotify,
