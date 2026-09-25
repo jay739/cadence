@@ -16,7 +16,9 @@ dependencies = [
     "pydantic>=2.9.0,<3.0",
     "pydantic-settings>=2.6.0,<3.0",
     "email-validator>=2.2.0,<3.0",
-    "sqlalchemy>=2.0.35,<3.0",
+    # Capped below 2.1 (released 2026-09-24) until the suite runs against it in its own PR:
+    # release builds resolve ranges fresh, so an untested minor would ship straight to prod.
+    "sqlalchemy>=2.0.35,<2.1",
     "aiosqlite>=0.20.0,<1.0",
     "alembic>=1.13.3,<2.0",
     "httpx>=0.27.2,<1.0",
