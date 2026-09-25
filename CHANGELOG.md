@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-24
+
+First tagged release. The release workflow publishes `ghcr.io/jay739/cadence:0.1.0` and
+`ghcr.io/jay739/cadence-ytdlp-shim:0.1.0` (amd64 and arm64), replacing the hand-built
+`cadence:local` and `ytdlp-shim:local` images.
+
 ### Added
 
 - Phase 1: FastAPI backend with multi-source search (Apple/iTunes, MusicBrainz, Spotify,
@@ -68,5 +74,3 @@ All notable changes to this project are documented here. Format loosely follows
   request that finds only lossy copies ends in a new `awaiting_quality` status that asks the
   requester whether to accept one rather than silently downgrading or failing. Existing rows are
   migrated (`flac` to `lossless`, `mp3` to `lossy`).
-
-No tagged release yet; `v0.1.0` will be cut once the pipeline is proven end to end.
