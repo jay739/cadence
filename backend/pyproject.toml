@@ -16,9 +16,10 @@ dependencies = [
     "pydantic>=2.9.0,<3.0",
     "pydantic-settings>=2.6.0,<3.0",
     "email-validator>=2.2.0,<3.0",
-    # Capped below 2.1 (released 2026-09-24) until the suite runs against it in its own PR:
-    # release builds resolve ranges fresh, so an untested minor would ship straight to prod.
-    "sqlalchemy>=2.0.35,<2.1",
+    # 2.1's typing is what lets insights.py drop its type: ignore comments, so 2.1 is the floor.
+    # [asyncio] because 2.1 no longer installs greenlet by default, and the async engine
+    # (AsyncSession everywhere) cannot run without it.
+    "sqlalchemy[asyncio]>=2.1.1,<3.0",
     "aiosqlite>=0.20.0,<1.0",
     "alembic>=1.13.3,<2.0",
     "httpx>=0.27.2,<1.0",

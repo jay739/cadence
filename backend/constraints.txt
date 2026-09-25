@@ -183,7 +183,7 @@ slowapi==0.1.10
     # via cadence (pyproject.toml)
 sortedcontainers==2.4.0
     # via cyclonedx-python-lib
-sqlalchemy==2.0.54
+sqlalchemy==2.1.1
     # via
     #   alembic
     #   cadence (pyproject.toml)

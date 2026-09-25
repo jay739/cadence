@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+
+- SQLAlchemy 2.0 to 2.1. Declared as `sqlalchemy[asyncio]` because 2.1 stopped installing
+  greenlet by default and every database call goes through `AsyncSession`; a plain version bump
+  would have failed at runtime. 2.1's typing also made two `type: ignore` comments in
+  `app/services/insights.py` unnecessary, so they are gone.
+- Backend dependencies are locked in `backend/constraints.txt` and installed from it by CI, the
+  release workflow and the Docker image (`scripts/lock-backend.sh` regenerates it).
+
 ## [0.1.0] - 2026-09-25
 
 First tagged release. The release workflow publishes `ghcr.io/jay739/cadence:0.1.0` and

@@ -149,7 +149,7 @@ async def _tier_stats(session: AsyncSession, since: datetime) -> list[TierStats]
         )
         .group_by(FulfillmentAttempt.backend)
     )
-    tried_by_backend: dict[str, int] = dict(tried.all())  # type: ignore[arg-type]
+    tried_by_backend: dict[str, int] = dict(tried.all())
 
     # Every known tier is reported even with no rows at all: "this tier was never asked" is
     # itself an answer to whether it is earning its keep, and silently omitting it would read
@@ -230,7 +230,7 @@ async def _daily_volume(
         .where(Request.created_at >= since)
         .group_by(day_expr)
     )
-    counts: dict[str, int] = dict(rows.all())  # type: ignore[arg-type]
+    counts: dict[str, int] = dict(rows.all())
 
     series: list[DailyVolume] = []
     for offset in range(days):
