@@ -24,7 +24,16 @@ jobs:
 
       - name: Install backend package + dev dependencies
         working-directory: backend
-        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+        run: python -m pip install --upgrade pip && pip install -c constraints.txt -e ".[dev]"
+
+      - name: constraints.txt is in sync with pyproject.toml
+        working-directory: backend
+        # pip-compile keeps every existing pin that still satisfies pyproject.toml, so this only
+        # changes the file when a range moved (e.g. a Dependabot bump) without re-locking.
+        run: |
+          pip install -q 'pip-tools>=7.4'
+          CUSTOM_COMPILE_COMMAND=scripts/lock-backend.sh python -m piptools compile -q --extra dev --strip-extras --output-file constraints.txt pyproject.toml
+          git diff --exit-code constraints.txt || { echo "::error::backend/constraints.txt is stale: run scripts/lock-backend.sh and commit the result"; exit 1; }
 
       - name: Ruff lint
         working-directory: backend
@@ -137,7 +146,7 @@ jobs:
 
       - name: Install backend package
         working-directory: backend
-        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+        run: python -m pip install --upgrade pip && pip install -c constraints.txt -e ".[dev]"
 
       - name: Set up Node
         uses: actions/setup-node@v7

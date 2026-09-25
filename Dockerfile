@@ -17,13 +17,13 @@ FROM python:3.12-slim AS backend-builder
 WORKDIR /backend
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
-COPY backend/pyproject.toml ./
+COPY backend/pyproject.toml backend/constraints.txt ./
 COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install .
+    && /opt/venv/bin/pip install -c constraints.txt .
 
 # ---- Stage 3: final runtime image ----
 FROM python:3.12-slim AS runtime

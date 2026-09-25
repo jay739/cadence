@@ -55,6 +55,22 @@ npx playwright install --with-deps chromium
 npm run test:e2e
 ```
 
+## Backend dependencies
+
+`backend/pyproject.toml` declares the allowed ranges; `backend/constraints.txt` pins the exact
+versions that CI, the release workflow and the Docker image all install (`pip install -c
+constraints.txt ...`). A release therefore ships what CI tested, instead of whatever was newest
+on PyPI at tag time (which is how SQLAlchemy 2.1 nearly reached production untested).
+
+```bash
+scripts/lock-backend.sh                            # after editing pyproject.toml
+scripts/lock-backend.sh --upgrade-package sqlalchemy   # move one package deliberately
+```
+
+Commit `constraints.txt` with the `pyproject.toml` change. CI fails if they are out of sync, so
+a Dependabot range bump needs a `scripts/lock-backend.sh` run on its branch before it can merge.
+The ytdlp-shim stays unpinned on purpose: yt-dlp has to track YouTube's frequent changes.
+
 ## Conventional commits
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`,
