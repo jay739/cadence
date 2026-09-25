@@ -5,11 +5,12 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-09-24
+## [0.1.0] - 2026-09-25
 
 First tagged release. The release workflow publishes `ghcr.io/jay739/cadence:0.1.0` and
 `ghcr.io/jay739/cadence-ytdlp-shim:0.1.0` (amd64 and arm64), replacing the hand-built
-`cadence:local` and `ytdlp-shim:local` images.
+`cadence:local` and `ytdlp-shim:local` images. SQLAlchemy is capped below 2.1 so the image
+ships the same 2.0.x that CI tested and production already runs; 2.1 lands separately.
 
 ### Added
 
