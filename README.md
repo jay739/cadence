@@ -1,5 +1,9 @@
 # Cadence
 
+<p align="center">
+  <img src="docs/logo.svg" alt="Cadence logo" width="128" />
+</p>
+
 A self-hosted, single-track music request service. Search for one song, request it, an admin
 approves it, and Cadence fetches exactly that track, nothing else.
 
