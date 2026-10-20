@@ -11,7 +11,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Docs-only changes (Markdown, LICENSE, issue and discussion templates,
+  # images and pages under docs/) skip the jobs below. They are skipped with a
+  # job-level `if`, not paths-ignore, so required checks still pass.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          # No usable base (manual run, new branch, rewritten history): build.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$base" HEAD)
+          echo "Changed files:"
+          echo "$changed"
+          docs='^(.*\.md|LICENSE.*|\.github/(ISSUE_TEMPLATE|DISCUSSION_TEMPLATE)/.*|docs/.*\.(svg|png|jpe?g|gif|webp|ico|html|css))$'
+          keep=''
+          code_files=$( { echo "$changed" | grep -vE "$docs"; [ -n "$keep" ] && echo "$changed" | grep -E "$keep"; } | grep -c . || true)
+          if [ "$code_files" -gt 0 ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Docs-only change: skipping the build and test jobs."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   backend:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Backend (lint, typecheck, test, audit)
     runs-on: ubuntu-latest
     steps:
@@ -58,6 +98,8 @@ jobs:
         run: pip-audit --strict --desc -r <(pip freeze --exclude-editable)
 
   ytdlp-shim:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: ytdlp-shim (lint, typecheck, test)
     runs-on: ubuntu-latest
     steps:
@@ -85,6 +127,8 @@ jobs:
         run: pytest -q
 
   web:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Web client (lint, typecheck, build, unit test)
     runs-on: ubuntu-latest
     steps:
@@ -133,9 +177,10 @@ jobs:
           retention-days: 1
 
   e2e:
+    if: needs.changes.outputs.code == 'true'
     name: End-to-end (Playwright, demo mode)
     runs-on: ubuntu-latest
-    needs: [backend, web]
+    needs: [changes, backend, web]
     steps:
       - uses: actions/checkout@v7
 
