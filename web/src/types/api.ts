@@ -1,6 +1,6 @@
 // Mirrors backend/app/schemas/*.py. Kept as plain hand-written types rather than generated
 // from the OpenAPI spec for Phase 1 to avoid adding a codegen step; revisit once the API is
-// stable and native clients need the same contract (see MISSION.md Phase 2+).
+// stable and native clients need the same contract (see Status in the README for the planned native apps).
 
 export type UserRole = "user" | "admin";
 

@@ -114,8 +114,7 @@ target path).
   owner-only permissions, the same pattern `SESSION_SECRET` uses. The settings API masks every
   secret in its responses (e.g. `••••••••ab12`), and admin-only routes guard both reading and
   updating them.
-- Full detail, including an honest covered/not-covered checklist, is in
-  [REPORT.md](REPORT.md).
+- To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Development guide
 
@@ -124,8 +123,8 @@ end-to-end tests) and coding conventions.
 
 ## Status
 
-Phase 1 (backend + web client) is built; see [REPORT.md](REPORT.md) for what shipped, what was
-decided along the way, and known gaps. Native apps (Windows, macOS, iOS, Android) are later,
+Phase 1 (backend + web client) is built; see [CHANGELOG.md](CHANGELOG.md) for what shipped in
+each release. Native apps (Windows, macOS, iOS, Android) are later,
 separate phases, each built against Phase 1's stable, OpenAPI-documented API.
 
 ## License
