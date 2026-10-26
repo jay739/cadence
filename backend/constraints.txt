@@ -6,7 +6,7 @@
 #
 aiosqlite==0.22.1
     # via cadence (pyproject.toml)
-alembic==1.20.0
+alembic==1.20.1
     # via cadence (pyproject.toml)
 annotated-doc==0.0.5
     # via fastapi
@@ -23,7 +23,7 @@ argon2-cffi==25.1.0
     #   passlib
 argon2-cffi-bindings==26.1.0
     # via argon2-cffi
-ast-serialize==0.11.2
+ast-serialize==0.13.1
     # via mypy
 boolean-py==5.0
     # via license-expression
@@ -31,7 +31,7 @@ cachecontrol==0.14.4
     # via
     #   cachecontrol
     #   pip-audit
-certifi==2026.7.22
+certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
@@ -40,13 +40,13 @@ cffi==2.1.1
     # via
     #   argon2-cffi-bindings
     #   cryptography
-charset-normalizer==3.5.1
+charset-normalizer==3.5.2
     # via requests
 click==8.5.0
     # via uvicorn
-coverage==7.16.1
+coverage==7.17.0
     # via pytest-cov
-cryptography==50.0.1
+cryptography==50.0.2
     # via cadence (pyproject.toml)
 cyclonedx-python-lib==11.12.0
     # via pip-audit
@@ -54,13 +54,13 @@ defusedxml==0.7.1
     # via py-serializable
 deprecated==1.3.1
     # via limits
-dnspython==2.8.0
+dnspython==2.9.0
     # via email-validator
 email-validator==2.3.0
     # via cadence (pyproject.toml)
-fastapi==0.141.1
+fastapi==0.162.0
     # via cadence (pyproject.toml)
-filelock==4.0.3
+filelock==4.2.4
     # via cachecontrol
 greenlet==3.5.6
     # via sqlalchemy
@@ -70,7 +70,7 @@ h11==0.16.0
     #   uvicorn
 httpcore==1.0.9
     # via httpx
-httptools==0.8.0
+httptools==0.9.0
     # via uvicorn
 httpx==0.28.1
     # via
@@ -82,9 +82,9 @@ idna==3.20
     #   email-validator
     #   httpx
     #   requests
-iniconfig==2.3.0
+iniconfig==2.3.1
     # via pytest
-librt==0.15.0
+librt==0.16.0
     # via mypy
 license-expression==30.4.4
     # via cyclonedx-python-lib
@@ -94,15 +94,15 @@ mako==1.4.3
     # via alembic
 markdown-it-py==4.2.0
     # via rich
-markupsafe==3.0.3
+markupsafe==3.0.4
     # via mako
 mdurl==0.1.2
     # via markdown-it-py
-msgpack==1.2.2
+msgpack==1.2.3
     # via cachecontrol
 mutagen==1.48.1
     # via cadence (pyproject.toml)
-mypy==2.3.1
+mypy==2.4.0
     # via cadence (pyproject.toml)
 mypy-extensions==1.1.0
     # via mypy
@@ -124,30 +124,30 @@ pip-audit==2.10.1
     # via cadence (pyproject.toml)
 pip-requirements-parser==32.0.1
     # via pip-audit
-platformdirs==4.11.14
+platformdirs==4.13.5
     # via pip-audit
-pluggy==1.6.0
+pluggy==1.7.0
     # via
     #   pytest
     #   pytest-cov
 py-serializable==2.1.0
     # via cyclonedx-python-lib
-pycparser==3.0
+pycparser==3.12
     # via cffi
-pydantic==2.13.5
+pydantic==2.14.1
     # via
     #   cadence (pyproject.toml)
     #   fastapi
     #   pydantic-settings
-pydantic-core==2.46.5
+pydantic-core==2.50.1
     # via pydantic
-pydantic-settings==2.15.0
+pydantic-settings==2.16.1
     # via cadence (pyproject.toml)
 pygments==2.21.0
     # via
     #   pytest
     #   rich
-pyjwt==2.15.0
+pyjwt==2.15.1
     # via cadence (pyproject.toml)
 pyparsing==3.3.3
     # via pip-requirements-parser
@@ -163,7 +163,7 @@ pytest-cov==7.1.0
     # via cadence (pyproject.toml)
 pytest-httpx==0.36.2
     # via cadence (pyproject.toml)
-python-dotenv==1.2.3
+python-dotenv==1.2.4
     # via
     #   pydantic-settings
     #   uvicorn
@@ -177,23 +177,23 @@ requests==2.34.2
     #   pip-audit
 rich==15.0.0
     # via pip-audit
-ruff==0.16.9
+ruff==0.17.2
     # via cadence (pyproject.toml)
 slowapi==0.1.10
     # via cadence (pyproject.toml)
 sortedcontainers==2.4.0
     # via cyclonedx-python-lib
-sqlalchemy==2.1.1
+sqlalchemy==2.1.6
     # via
     #   alembic
     #   cadence (pyproject.toml)
-starlette==1.7.0
+starlette==1.9.0
     # via fastapi
 structlog==26.1.0
     # via cadence (pyproject.toml)
-tenacity==9.1.4
+tenacity==9.2.1
     # via cadence (pyproject.toml)
-tomli==2.4.1
+tomli==2.5.0
     # via pip-audit
 tomli-w==1.2.0
     # via pip-audit
@@ -222,13 +222,13 @@ urllib3==2.8.0
     # via requests
 uvicorn==0.54.0
     # via cadence (pyproject.toml)
-uvloop==0.22.1
+uvloop==0.23.0
     # via uvicorn
 watchfiles==1.3.0
     # via uvicorn
-websockets==17.1
+websockets==17.3
     # via uvicorn
-wrapt==2.4.1
+wrapt==2.5.1
     # via deprecated
 
 # The following packages are considered to be unsafe in a requirements file:
